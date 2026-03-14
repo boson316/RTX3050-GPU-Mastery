@@ -2,9 +2,9 @@
 
 大二資工生使用 **RTX 3050 6GB Laptop GPU (sm_86)** 實作 GPU programming benchmarks。
 
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.4%20%7C%20cuDNN-red?logo=pytorch)](https://pytorch.org/)
-[![CUDA](https://img.shields.io/badge/CUDA-12.4-green?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.4-orange)](https://pytorch.org)
+[![CUDA](https://img.shields.io/badge/CUDA-12.4-green)](https://developer.nvidia.com/cuda-toolkit)
+[![License](https://img.shields.io/github/license/boson316/RTX3050-GPU-Mastery)](LICENSE)
 
 ---
 

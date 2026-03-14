@@ -1,0 +1,16 @@
+name: Benchmark
+
+on: [push]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install torch + triton
+        run: pip install torch triton
+      - name: Run conv benchmark
+        run: python benchmarks/conv_benchmark.py
