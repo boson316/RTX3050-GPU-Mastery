@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61", "wheel", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rtx3050-gpu-mastery"
+version = "0.1.0"
+description = "CUDA / PyTorch Extension / Triton portfolio — 1.5x cuDNN on RTX 3050"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+]
+
+[project.optional-dependencies]
+triton = ["triton; sys_platform != 'win32'", "triton-windows; sys_platform == 'win32'"]
+dev = ["ruff", "pytest"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

@@ -1,0 +1,8 @@
+1.5x cuDNN RTX3050 portfolio
+
+- Full source: cuda_learn → cuda/ + pytorch/, cuda_torch_ext → extension/ + triton/
+- README: hook, badges, TOC, benchmarks, cuda/pytorch/extension/triton structure
+- CI: .github/workflows/ci.yml; docs/benchmarks.md, CONTRIBUTING.md
+- extension: setup.py, conv_kernel.cu, mnist_custom_conv.py, build scripts
+- benchmarks/: matrix_mul_speedup.png, mnist_acc_loss.png, conv_benchmark.png
+- pyproject.toml, LICENSE (MIT), .gitignore

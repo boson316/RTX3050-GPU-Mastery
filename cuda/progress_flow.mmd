@@ -1,0 +1,13 @@
+%% Preview: click "Open Preview" in editor. Export PNG: toolbar above preview or Ctrl+Shift+P "Mermaid: Export"
+graph TD
+    A[Vector Add<br/>500x] --> B[Matrix Mul<br/>N=1024 tiled]
+    B --> C[Reduction<br/>1M &lt;1ms]
+    C --> D[MNIST CNN<br/>99%+]
+    D --> E[Custom CUDA<br/>PyTorch ext]
+    E --> F[GitHub ready]
+    style A fill:#90EE90
+    style B fill:#90EE90
+    style C fill:#90EE90
+    style D fill:#FFD700
+    style E fill:#87CEEB
+    style F fill:#FFB6C1

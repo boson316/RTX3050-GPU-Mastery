@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual
+.venv/
+venv/
+env/
+
+# CUDA / C++ build
+*.exe
+*.o
+*.obj
+*.ptx
+*.cubin
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (MNIST)
+data/
+
+# Jupyter
+.ipynb_checkpoints/
