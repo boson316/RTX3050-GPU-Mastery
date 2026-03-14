@@ -102,11 +102,11 @@ python extension/mnist_custom_conv.py
 
 ## ⭐ Citation & Star
 
-若此 repo 對你有幫助，歡迎 **Star** ⭐。推上 GitHub 後請將下方 `<your-username>` 換成你的 GitHub 帳號。
+若此 repo 對你有幫助，歡迎 **Star** ⭐。
 
 ```text
 RTX 3050 Laptop GPU Programming Benchmarks — 521x matrix, 99% MNIST, 1.5x conv.
-https://github.com/<your-username>/RTX3050-GPU-Mastery
+https://github.com/boson316/RTX3050-GPU-Mastery
 ```
 
 ## License
