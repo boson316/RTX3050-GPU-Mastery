@@ -92,3 +92,26 @@ git reset HEAD 某個路徑或檔案
 ```
 
 目前 `.gitignore` 已排除：`.venv/`、`build/`、`*.exe`、`*.nsys-rep`、`*.ncu-rep`、`data/` 等。
+
+---
+
+## Rebase 衝突排除（push 被拒時）
+
+若執行 `git pull --rebase origin main` 後出現 **"You must edit all merge conflicts"**，而實際上 README 等檔案的衝突已手動解決，常見原因是：**有檔案「已暫存但工作區還有修改」**（例如 `gpu_kernels/transformer/transformer_kernels.cu` 的換行符 CRLF），Git 仍視為未完全解決。
+
+**處理方式（CMD）：**
+
+```cmd
+cd /d c:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery
+
+git add -A
+
+set GIT_EDITOR=true
+git rebase --continue
+
+git push origin main
+```
+
+- **`git add -A`** — 把所有變更（含該檔案）加入暫存，讓 Git 認定衝突已處理完。
+- **`set GIT_EDITOR=true`** — 讓 `git rebase --continue` 不跳出編輯器。
+- 再執行 **`git rebase --continue`** 與 **`git push origin main`**。
