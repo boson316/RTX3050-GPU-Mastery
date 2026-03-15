@@ -1,0 +1,15 @@
+# RTX 3050 GPU Optimization Lab — reproducible env
+# Install: pip install -r requirements.txt
+# PyTorch with CUDA: use --index-url https://download.pytorch.org/whl/cu124
+
+torch>=2.0
+torchvision
+matplotlib>=3.5
+ninja
+
+# Triton (Linux: triton; Windows: triton-windows)
+# pip install triton          # Linux
+# pip install triton-windows  # Windows
+
+# Optional: Jupyter for notebooks
+# jupyter

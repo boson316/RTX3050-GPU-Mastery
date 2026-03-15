@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rtx3050-gpu-mastery"
 version = "0.1.0"
-description = "CUDA / PyTorch Extension / Triton portfolio — 1.5x cuDNN on RTX 3050"
+description = "GPU kernel optimization playground — CUDA, Triton, PyTorch extensions, benchmarks, profiling (RTX 3050 / ML infrastructure showcase)"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"

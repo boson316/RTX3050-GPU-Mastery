@@ -1,0 +1,9 @@
+{
+  "kernels": [
+    {
+      "kernel": "open .ncu-rep in Nsight Compute UI",
+      "metrics": {}
+    }
+  ],
+  "note": "From ncu --page raw --csv"
+}

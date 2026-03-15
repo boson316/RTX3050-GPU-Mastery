@@ -34,3 +34,9 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Profiling (large binaries)
+*.nsys-rep
+*.ncu-rep
+profiling/nsight_reports/*.rep
+profiling/nsight_reports/*.ncu-rep

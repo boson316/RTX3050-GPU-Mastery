@@ -10,8 +10,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-# Allow extension/mnist_custom_conv to find triton when run from repo root
 _root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_root))
 if (_root / "triton").is_dir():
     sys.path.insert(0, str(_root / "triton"))
 
@@ -55,9 +55,12 @@ def main():
     except ImportError:
         print("conv_benchmark | custom_conv not installed (OK in CI)")
 
-    # Optional: Triton
+    # Optional: Triton (triton_kernels.conv or legacy triton/conv_triton)
     try:
-        from conv_triton import conv2d_triton_fp16
+        try:
+            from triton_kernels.conv import conv2d_triton_fp16
+        except ImportError:
+            from conv_triton import conv2d_triton_fp16
         x_h = x.half()
         w_h = torch_conv.weight.half()
         b_h = torch_conv.bias.half()
