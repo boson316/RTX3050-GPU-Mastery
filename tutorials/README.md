@@ -35,4 +35,4 @@ Step-by-step tutorials for GPU programming in this repository. Each tutorial exp
 - **FlashAttention:** `python flash_attention_simple/benchmark_flash_attention.py`.
 - **Transformer:** `python benchmarks/transformer_benchmark.py`.
 
-See [getting_started.md](../docs/getting_started.md) and the main [README.md](../README.md) for full setup.
+See [getting_started.md](../docs/getting_started.md) and the main [README.md](../README.md) (English) / [README.zh-TW.md](../README.zh-TW.md) (中文) for full setup.

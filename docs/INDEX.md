@@ -2,6 +2,8 @@
 
 Central index for **RTX 3050 GPU Optimization Lab** documentation. Beginner-friendly intro first; deeper technical docs follow.
 
+**Main README:** [English](../README.md) · [中文](../README.zh-TW.md)
+
 ---
 
 ## Technical articles (research lab)

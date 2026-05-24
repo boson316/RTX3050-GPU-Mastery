@@ -2,7 +2,7 @@
 
 大二資工生使用 **RTX 3050 6GB Laptop GPU (sm_86)** 實作 GPU programming benchmarks。
 
-此為舊版 README，對照用。新版請見 [README.md](README.md)。
+此為舊版 README，對照用。新版請見 [README.md](README.md)（英文）或 [README.zh-TW.md](README.zh-TW.md)（中文）。
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.4%20%7C%20cuDNN-red?logo=pytorch)](https://pytorch.org/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.4-green?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)

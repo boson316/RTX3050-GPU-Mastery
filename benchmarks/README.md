@@ -1,5 +1,7 @@
 # Benchmarks — 可重現效能測試與圖表
 
+**Languages:** [中文](README.md) · [English](README.en.md) — repo root: [English](../README.md) · [中文](../README.zh-TW.md)
+
 ## 綜合 Benchmark 套件（推薦）
 
 從 repo 根目錄執行。每個腳本比較 **PyTorch / CUDA kernel / Triton kernel**，並輸出：
