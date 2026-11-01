@@ -1,14 +1,14 @@
 """
 MNIST Custom CUDA Conv2d + Benchmark vs torch.nn.Conv2d
-- custom_conv：3x3, in=1, out=32，FP16 + 16x16 tile（CUDA extension）
-- conv_triton：Triton 重寫 FP16 conv，目標約 1.5x
+- custom_conv: 3x3, C_in=1, C_out=32, 16x16 output tile x 32 channels per block (CUDA extension,
+  FP32 or FP16 storage, FP32 accumulation; kernel in conv3x3_kernel.cuh)
+- conv2d_triton_fp16: Triton version from triton_kernels/conv
 """
 import sys
 from pathlib import Path
 
 _root = Path(__file__).resolve().parent.parent
-if (_root / "triton").is_dir():
-    sys.path.insert(0, str(_root / "triton"))
+sys.path.insert(0, str(_root))
 
 import time
 
@@ -24,7 +24,7 @@ except ImportError:
     _custom_path = None
 
 try:
-    from conv_triton import conv2d_triton_fp16
+    from triton_kernels.conv import conv2d_triton_fp16
     HAS_TRITON = True
 except ImportError:
     HAS_TRITON = False

@@ -5,18 +5,20 @@ PyTorch MNIST GPU 訓練（輕量 CNN + AMP + Augmentation）
 執行：python mnist_gpu.py
 """
 
+import matplotlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torch.amp import autocast, GradScaler
-from torch.optim.lr_scheduler import CosineAnnealingLR
 import torchvision
 import torchvision.transforms as transforms
-import matplotlib
+from torch.amp import GradScaler, autocast
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import time
+
+import matplotlib.pyplot as plt
 
 # 加速：cudnn 自動選最快演算法（輸入尺寸固定時）
 torch.backends.cudnn.benchmark = True
