@@ -107,9 +107,9 @@ _fwd_kernel[grid](q, k, v, o, ...)
 
 | Kernel | Config | Result |
 |--------|--------|--------|
-| Matmul 1024×1024 FP16 | Triton vs PyTorch | Comparable or better GFLOPS (run `python benchmarks/matmul_benchmark.py`) |
+| Matmul 1024×1024 FP16 | Triton vs PyTorch | Comparable or better GFLOPS (run `python benchmarks/benchmark_matmul.py`) |
 | Conv 3×3 B=128 FP16 | Triton vs torch | **~1.27×** (see docs/benchmarks.md) |
-| Flash Attention | Triton vs SDPA | See `triton_kernels/flash_attention` and `benchmarks/attention_benchmark.py` |
+| Flash Attention | Triton vs SDPA | See `triton_kernels/flash_attention` and `benchmarks/benchmark_attention.py` |
 
 Run from repo root: `python -m triton_kernels.run_benchmarks`.
 

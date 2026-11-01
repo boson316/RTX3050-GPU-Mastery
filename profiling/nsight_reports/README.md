@@ -46,10 +46,10 @@ Plot options: `--prefix`, `--B`, `--S`, `--H`, `-o <path>`. GPU peak can be set 
 
 ```bash
 # Nsight Systems (timeline only)
-nsys profile -o nsight_reports/my_timeline --stats=true python benchmarks/transformer_benchmark.py
+nsys profile -o nsight_reports/my_timeline --stats=true python benchmarks/benchmark_transformer.py
 
 # Nsight Compute (first 5 kernels, basic set)
-ncu -o nsight_reports/my_kernels -c 5 --set basic python benchmarks/transformer_benchmark.py
+ncu -o nsight_reports/my_kernels -c 5 --set basic python benchmarks/benchmark_transformer.py
 ```
 
 Open `.nsys-rep` in Nsight Systems GUI and `.ncu-rep` in Nsight Compute GUI for detailed inspection.

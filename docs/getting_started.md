@@ -89,7 +89,7 @@ All commands from **repository root**.
 ### Matrix multiply (PyTorch vs Triton)
 
 ```bash
-python benchmarks/matmul_benchmark.py
+python benchmarks/benchmark_matmul.py
 ```
 
 Example output (RTX 3050): torch and Triton latency (ms) and GFLOPS for N=512, 1024, 2048.
@@ -97,7 +97,7 @@ Example output (RTX 3050): torch and Triton latency (ms) and GFLOPS for N=512, 1
 ### Conv2d (torch vs extension vs Triton)
 
 ```bash
-python benchmarks/conv_benchmark.py
+python benchmarks/benchmark_conv.py
 ```
 
 Example: torch.nn.Conv2d vs custom_conv2d vs Triton 3×3 conv (B=128, 1→32 channels).
@@ -105,7 +105,7 @@ Example: torch.nn.Conv2d vs custom_conv2d vs Triton 3×3 conv (B=128, 1→32 cha
 ### Transformer kernels (QKV, Softmax, LayerNorm, GELU, MLP)
 
 ```bash
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 ```
 
 Reports latency (ms), memory bandwidth (GB/s), and GFLOPS per kernel. Use `TRANSFORMER_BENCHMARK_CUDA=1` to include custom CUDA kernels (requires built extension).

@@ -37,16 +37,16 @@ python benchmarks/benchmark_transformer.py
 
 | 腳本 | 說明 |
 |------|------|
-| `matmul_benchmark.py` | PyTorch vs Triton matmul，多種 N、dtype |
-| `conv_benchmark.py` | torch.nn.Conv2d vs custom_conv vs Triton conv |
-| `attention_benchmark.py` | PyTorch SDPA vs Triton Flash Attention |
-| `transformer_benchmark.py` | Transformer 子 kernel 終端輸出（無 CSV/圖表） |
+| `benchmark_matmul.py` | PyTorch vs Triton matmul，多種 N、dtype |
+| `benchmark_conv.py` | torch.nn.Conv2d vs custom_conv vs Triton conv |
+| `benchmark_attention.py` | PyTorch SDPA vs Triton Flash Attention |
+| `benchmark_transformer.py` | Transformer 子 kernel 終端輸出（無 CSV/圖表） |
 
 ```bash
-python benchmarks/matmul_benchmark.py
-python benchmarks/conv_benchmark.py
-python benchmarks/attention_benchmark.py
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_matmul.py
+python benchmarks/benchmark_conv.py
+python benchmarks/benchmark_attention.py
+python benchmarks/benchmark_transformer.py
 ```
 
 ## 其他圖檔

@@ -50,4 +50,4 @@ if errorlevel 1 (
 ::   set TRANSFORMER_BENCHMARK_FULL=1
 ::   set TRANSFORMER_BENCHMARK_CUDA=1
 
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py

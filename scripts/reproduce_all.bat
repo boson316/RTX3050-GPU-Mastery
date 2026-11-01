@@ -4,13 +4,13 @@ cd /d "%~dp0\.."
 echo === RTX 3050 GPU Lab - Reproduce all ===
 echo.
 echo 1. Matmul benchmark
-python benchmarks/matmul_benchmark.py
+python benchmarks/benchmark_matmul.py
 echo.
 echo 2. Conv benchmark
-python benchmarks/conv_benchmark.py
+python benchmarks/benchmark_conv.py
 echo.
 echo 3. Transformer benchmark (light)
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 echo.
 echo 4. Generate charts (skip MNIST by default)
 python benchmarks/generate_charts.py --skip-mnist

@@ -27,7 +27,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NSIGHT_REPORTS = REPO_ROOT / "profiling" / "nsight_reports"
-BENCHMARK_SCRIPT = REPO_ROOT / "benchmarks" / "transformer_benchmark.py"
+BENCHMARK_SCRIPT = REPO_ROOT / "benchmarks" / "benchmark_transformer.py"
 QUICK_PROBE_SCRIPT = Path(__file__).resolve().parent / "_ncu_quick_probe.py"
 REPORT_PREFIX = "transformer"
 

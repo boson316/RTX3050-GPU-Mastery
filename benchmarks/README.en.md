@@ -37,10 +37,10 @@ python benchmarks/benchmark_transformer.py
 
 | Script | Description |
 |--------|-------------|
-| `matmul_benchmark.py` | PyTorch vs Triton matmul, multiple N and dtypes |
-| `conv_benchmark.py` | torch.nn.Conv2d vs custom_conv vs Triton |
-| `attention_benchmark.py` | PyTorch SDPA vs Triton Flash Attention |
-| `transformer_benchmark.py` | Per-kernel latency & bandwidth |
+| `benchmark_matmul.py` | PyTorch vs Triton matmul, multiple N and dtypes |
+| `benchmark_conv.py` | torch.nn.Conv2d vs custom_conv vs Triton |
+| `benchmark_attention.py` | PyTorch SDPA vs Triton Flash Attention |
+| `benchmark_transformer.py` | Per-kernel latency & bandwidth |
 | `generate_charts.py` | Aggregate charts (`--skip-mnist` to skip MNIST training) |
 
 ## One-command dashboard

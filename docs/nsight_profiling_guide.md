@@ -32,7 +32,7 @@ So “memory access” in the sense of **how data is read/written** is optimized
 
 You profile **whatever the application launches**. In this repo:
 
-- **Default benchmark:** `python benchmarks/transformer_benchmark.py` (light: B=8, S=256, H=768).
+- **Default benchmark:** `python benchmarks/benchmark_transformer.py` (light: B=8, S=256, H=768).
 - **Quick probe:** `profiling/_ncu_quick_probe.py` (one matmul) for a short ncu run (~1 min).
 - **Full transformer:** Optional env `TRANSFORMER_BENCHMARK_FULL=1` and `TRANSFORMER_BENCHMARK_CUDA=1`.
 
@@ -74,8 +74,8 @@ Open `.nsys-rep` in Nsight Systems GUI and `.ncu-rep` in Nsight Compute GUI for 
 
 | Step | Command / script | Output |
 |------|-------------------|--------|
-| 1 | `nsys profile -o ... python benchmarks/transformer_benchmark.py` | .nsys-rep |
-| 2 | `ncu -o ... -c 10 --set basic python benchmarks/transformer_benchmark.py` | .ncu-rep |
+| 1 | `nsys profile -o ... python benchmarks/benchmark_transformer.py` | .nsys-rep |
+| 2 | `ncu -o ... -c 10 --set basic python benchmarks/benchmark_transformer.py` | .ncu-rep |
 | 3 | `ncu --import <rep> --page raw --csv` (or script) | stdout → parsed to JSON |
 | 4 | `python profiling/roofline_analysis/plot_roofline.py` | roofline_model.png |
 

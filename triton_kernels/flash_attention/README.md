@@ -12,4 +12,4 @@ out = flash_attention_triton(q, k, v, causal=False)  # q,k,v (B,H,S,D) fp16
 ## Reference
 
 - [FlashAttention: Fast and Memory-Efficient Exact Attention](https://arxiv.org/abs/2205.14135)
-- Compare with `gpu_kernels/attention` (naive CUDA) and `benchmarks/attention_benchmark.py`.
+- Compare with `gpu_kernels/attention` (naive CUDA) and `benchmarks/benchmark_attention.py`.

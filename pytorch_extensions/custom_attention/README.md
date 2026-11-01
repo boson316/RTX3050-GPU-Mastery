@@ -9,4 +9,4 @@ from pytorch_extensions.custom_attention import custom_attention
 out = custom_attention(q, k, v, causal=False, use_triton=True)
 ```
 
-See `benchmarks/attention_benchmark.py` for timing vs PyTorch SDPA and Triton Flash.
+See `benchmarks/benchmark_attention.py` for timing vs PyTorch SDPA and Triton Flash.

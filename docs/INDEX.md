@@ -66,4 +66,3 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
-| [DCARD_POST.md](DCARD_POST.md) | Social post template (Dcard) |

@@ -27,9 +27,9 @@ chmod +x scripts/reproduce_all.sh
 
 ## What runs (Option B)
 
-1. **Matmul benchmark** — `python benchmarks/matmul_benchmark.py`
-2. **Conv benchmark** — `python benchmarks/conv_benchmark.py`
-3. **Transformer benchmark** — `python benchmarks/transformer_benchmark.py` (light mode)
+1. **Matmul benchmark** — `python benchmarks/benchmark_matmul.py`
+2. **Conv benchmark** — `python benchmarks/benchmark_conv.py`
+3. **Transformer benchmark** — `python benchmarks/benchmark_transformer.py` (light mode)
 4. **Chart generation** — `python benchmarks/generate_charts.py --skip-mnist` (omit `--skip-mnist` to include MNIST training)
 5. **Roofline plot** — `python profiling/roofline_analysis/plot_roofline.py`
 

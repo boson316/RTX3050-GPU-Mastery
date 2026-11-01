@@ -40,3 +40,17 @@ data/
 *.ncu-rep
 profiling/nsight_reports/*.rep
 profiling/nsight_reports/*.ncu-rep
+
+# MSVC / linker outputs
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.dll
+*.so
+*.pyd
+# JIT extension build dirs
+**/build/
+# roadmap binaries (no extension on Linux)
+cuda_roadmap/level*/*/*_bench
+cuda_roadmap/level*/*/wmma_example

@@ -40,7 +40,7 @@ Short descriptions of each kernel and the optimizations used.
 
 - **Tiling**: Output tile (e.g. 16×16) per block; input tile includes halo (18×18 for 3×3). Weights 3×3 per output channel in shared memory.
 - **FP16**: Extension uses `__half2` and 16×16 tiles for better throughput on Ampere (sm_86).
-- **Use case**: CNN building block; compare with cuDNN and Triton in `benchmarks/conv_benchmark.py`.
+- **Use case**: CNN building block; compare with cuDNN and Triton in `benchmarks/benchmark_conv.py`.
 
 ---
 
@@ -68,4 +68,4 @@ Short descriptions of each kernel and the optimizations used.
 **Operation**: Same 3×3 conv as above; implemented in Triton for quick iteration and portability.
 
 - **Grid**: One program per (batch, tile_h, tile_w, output-channel block).
-- **Use case**: Compare with CUDA extension and cuDNN in `benchmarks/conv_benchmark.py`.
+- **Use case**: Compare with CUDA extension and cuDNN in `benchmarks/benchmark_conv.py`.

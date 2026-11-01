@@ -96,7 +96,7 @@ mlp_linear2_fp16_kernel<<<grid2, block, 0, stream>>>(mid, w2, b2, out, M, N1, N2
 
 ## 5. Benchmark results (RTX 3050)
 
-Run from repo root: `python benchmarks/transformer_benchmark.py`.
+Run from repo root: `python benchmarks/benchmark_transformer.py`.
 
 Typical output (B=8, S=256, H=768, FP16) includes:
 

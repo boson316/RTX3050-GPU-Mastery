@@ -14,4 +14,4 @@ Or from `triton_kernels/matmul`: `python matmul_triton.py`
 
 ## Tuning
 
-Block sizes `BLOCK_M`, `BLOCK_N`, `BLOCK_K` can be tuned per GPU (see `benchmarks/matmul_benchmark.py`).
+Block sizes `BLOCK_M`, `BLOCK_N`, `BLOCK_K` can be tuned per GPU (see `benchmarks/benchmark_matmul.py`).

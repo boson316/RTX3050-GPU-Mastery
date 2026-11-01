@@ -23,7 +23,7 @@ All kernels use FP16 (`__half` / `torch.float16`) with float32 accumulation wher
 1. Open **"x64 Native Tools Command Prompt for VS 2022"** (or 2019) from the Start Menu, then:
    ```cmd
    cd path\to\RTX3050-GPU-Mastery
-   python benchmarks/transformer_benchmark.py
+   python benchmarks/benchmark_transformer.py
    ```
    On first run the CUDA extension will JIT-compile (may take 1–2 minutes).
 
@@ -44,7 +44,7 @@ pip install --no-build-isolation -e gpu_kernels/transformer/
 From repo root (FP16, latency + throughput + memory bandwidth):
 
 ```bash
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 ```
 
 Compares PyTorch reference, Triton, and these CUDA kernels on RTX 3050.

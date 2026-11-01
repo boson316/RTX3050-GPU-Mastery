@@ -66,7 +66,7 @@ See [04_triton_kernels.md](04_triton_kernels.md): row max → row sum(exp) → w
 | **Triton LayerNorm** | [triton_kernels/layernorm/layernorm_triton.py](../triton_kernels/layernorm/layernorm_triton.py) | Fused LayerNorm. |
 | **Triton GELU** | [triton_kernels/gelu/gelu_triton.py](../triton_kernels/gelu/gelu_triton.py) | GELU activation. |
 | **Triton MLP** | [triton_kernels/mlp/mlp_triton.py](../triton_kernels/mlp/mlp_triton.py) | Fused MLP block. |
-| **Transformer benchmark** | [benchmarks/transformer_benchmark.py](../benchmarks/transformer_benchmark.py) | Compares PyTorch, Triton, and CUDA kernels (latency, throughput, bandwidth). |
+| **Transformer benchmark** | [benchmarks/benchmark_transformer.py](../benchmarks/benchmark_transformer.py) | Compares PyTorch, Triton, and CUDA kernels (latency, throughput, bandwidth). |
 
 **Build (CUDA extension):** from repo root, in a shell with `cl.exe` and `nvcc` in PATH (e.g. x64 Native Tools Command Prompt for VS):
 
@@ -77,7 +77,7 @@ pip install --no-build-isolation -e gpu_kernels/transformer/
 Or run the benchmark once; it will JIT-build the extension:
 
 ```bash
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 ```
 
 **Docs:** [gpu_kernels/transformer/README.md](../gpu_kernels/transformer/README.md), [docs/transformer_gpu_kernels.md](../docs/transformer_gpu_kernels.md), [docs/transformer_benchmark_gpu_load.md](../docs/transformer_benchmark_gpu_load.md).
