@@ -1,11 +1,18 @@
-# CI: Lint & Test (Python only; CUDA build requires GPU toolchain)
+# CI without a GPU. Three independent checks:
+#   lint          ruff (fails the build - no `|| true`)
+#   triton-tests  every Triton kernel vs PyTorch, executed by the Triton interpreter on CPU
+#   cuda          nvcc compile of every .cu file for sm_86 (-Werror on warnings from our code)
+#                 + CPU emulation tests that run the real CUDA kernel source with
+#                   std::thread/std::barrier and compare to naive references
 name: CI
 
 on:
   push:
-    branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -14,25 +21,48 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install deps
-        run: |
-          pip install --upgrade pip
-          pip install ruff
-      - name: Lint (ruff)
-        run: ruff check . --ignore E501 || true
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check .
 
-  test-python:
+  triton-tests:
     runs-on: ubuntu-latest
+    env:
+      TRITON_INTERPRET: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install PyTorch (CPU for CI)
-        run: pip install torch torchvision
-      - name: Run Python tests (no CUDA)
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU PyTorch + Triton
         run: |
-          python -c "import torch; print(torch.__version__)"
-          if [ -f pytorch/mnist_gpu.py ]; then echo "mnist_gpu.py present"; fi
-          if [ -f triton/conv_triton.py ]; then echo "triton conv present"; fi
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install triton numpy pytest
+      - name: Run kernel correctness tests (Triton interpreter)
+        run: python -m pytest -q
+
+  cuda:
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile every CUDA source for sm_86
+        run: |
+          set -e
+          for f in $(find . -name '*.cu' -not -path './extension/conv_kernel.cu'); do
+            echo "nvcc $f"
+            nvcc -arch=sm_86 -O3 -std=c++17 -Xcompiler -Wall --Werror all-warnings -c "$f" -o /tmp/out.o
+          done
+          # Kernels behind the PyTorch bindings (headers are self-contained)
+          for h in extension/conv3x3_kernel.cuh; do
+            printf '#include "%s"\ntemplate __global__ void conv3x3::conv3x3_c32_kernel<float>(const float*, const float*, const float*, float*, int, int);\n' "$PWD/$h" > /tmp/inst.cu
+            nvcc -arch=sm_86 -O3 -std=c++17 --Werror all-warnings -c /tmp/inst.cu -o /tmp/out.o
+          done
+      - name: Register / spill report (informational)
+        run: |
+          nvcc -arch=sm_86 -O3 -std=c++17 --resource-usage -c flash_attention_simple/flash_attention_cuda.cu -o /tmp/o.o 2>&1 | grep -E "registers|spill" || true
+      - name: CPU emulation tests of CUDA kernels
+        run: |
+          apt-get update -qq && apt-get install -y -qq g++-12 > /dev/null
+          CXX=g++-12 tests/cuda_emulation/run_all.sh
