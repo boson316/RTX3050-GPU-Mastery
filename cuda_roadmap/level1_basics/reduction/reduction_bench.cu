@@ -1,86 +1,58 @@
 /*
- * Level 1: Reduction — Naive (atomicAdd) vs Optimized (shared memory tree)
- * Outputs: CUDA_NAIVE_MS=... CUDA_OPTIMIZED_MS=...
+ * Level 1: Sum reduction of N = 2^20 floats.
+ *   naive:     every thread does atomicAdd on ONE global address -> 2^20 serialised atomics
+ *   optimized: shared-memory tree per block (sequential addressing, no bank conflicts),
+ *              then one atomicAdd per block (4096 atomics instead of 1M)
+ * Both compute the full sum, so the results are directly comparable and verified.
  */
-#include <stdio.h>
-#include <cuda_runtime.h>
-
-#define CUDA_CHECK(call) do { \
-    cudaError_t err = (call); \
-    if (err != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d\n", cudaGetErrorString(err), __FILE__, __LINE__); exit(1); } \
-} while(0)
+#include "../../common/bench_common.cuh"
 
 const int N = 1 << 20;
 const int BLOCK = 256;
 
-// ---- Naive: every thread atomicAdd to a single global location (very slow) ----
 __global__ void reduce_naive(const float* input, float* output, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n)
-        atomicAdd(output, input[i]);
+    if (i < n) atomicAdd(output, input[i]);
 }
 
-// ---- Optimized: tree reduction in shared memory, one value per block ----
 __global__ void reduce_optimized(const float* input, float* output, int n) {
-    extern __shared__ float sdata[];
+    __shared__ float sdata[BLOCK];
     int tid = threadIdx.x;
     int i = blockIdx.x * BLOCK + tid;
     sdata[tid] = (i < n) ? input[i] : 0.f;
     __syncthreads();
-    for (int s = BLOCK / 2; s > 0; s >>= 1) {
+    for (int s = BLOCK / 2; s > 0; s >>= 1) {  // sequential addressing: active threads stay contiguous
         if (tid < s) sdata[tid] += sdata[tid + s];
         __syncthreads();
     }
-    if (tid == 0) output[blockIdx.x] = sdata[0];
-}
-
-static float run_naive(float* d_in, float* d_out) {
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start));
-    CUDA_CHECK(cudaEventCreate(&stop));
-    CUDA_CHECK(cudaMemset(d_out, 0, sizeof(float)));
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    reduce_naive<<<(N + BLOCK - 1) / BLOCK, BLOCK>>>(d_in, d_out, N);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(stop, 0));
-    CUDA_CHECK(cudaEventSynchronize(stop));
-    float ms = 0.f;
-    CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
-    cudaEventDestroy(start); cudaEventDestroy(stop);
-    return ms;
-}
-
-static float run_optimized(float* d_in, float* d_out) {
-    int nBlocks = (N + BLOCK - 1) / BLOCK;
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start));
-    CUDA_CHECK(cudaEventCreate(&stop));
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    reduce_optimized<<<nBlocks, BLOCK, BLOCK * sizeof(float)>>>(d_in, d_out, N);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(stop, 0));
-    CUDA_CHECK(cudaEventSynchronize(stop));
-    float ms = 0.f;
-    CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
-    cudaEventDestroy(start); cudaEventDestroy(stop);
-    return ms;
+    if (tid == 0) atomicAdd(output, sdata[0]);
 }
 
 int main() {
+    auto h_in = bench::random_vector(N, 7, 0.f, 1.f);
+    double sum = 0; for (float v : h_in) sum += v;
+    const std::vector<double> ref{sum};
+
     float *d_in, *d_out;
     CUDA_CHECK(cudaMalloc(&d_in, (size_t)N * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_out, (size_t)((N + BLOCK - 1) / BLOCK) * sizeof(float)));
-    float *h_in = (float*)malloc((size_t)N * sizeof(float));
-    for (int i = 0; i < N; i++) h_in[i] = 1.0f;
-    CUDA_CHECK(cudaMemcpy(d_in, h_in, (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&d_out, sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in.data(), (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
 
-    float naive_ms = run_naive(d_in, d_out);
-    float opt_ms  = run_optimized(d_in, d_out);
+    const int grid = (N + BLOCK - 1) / BLOCK;
+    // The memset is part of the operation (the kernels accumulate into *d_out).
+    auto naive = [&] { cudaMemsetAsync(d_out, 0, sizeof(float)); reduce_naive<<<grid, BLOCK>>>(d_in, d_out, N); };
+    auto opt = [&] { cudaMemsetAsync(d_out, 0, sizeof(float)); reduce_optimized<<<grid, BLOCK>>>(d_in, d_out, N); };
 
-    printf("CUDA_NAIVE_MS=%.6f\n", naive_ms);
-    printf("CUDA_OPTIMIZED_MS=%.6f\n", opt_ms);
-    printf("N=%d\n", N);
+    // FP32 accumulation of 1M values in arbitrary (atomic) order: allow ~1e-4 relative error.
+    bool ok = true;
+    naive(); ok &= bench::verify("NAIVE", d_out, ref, 0.0, 1e-4);
+    opt();   ok &= bench::verify("OPTIMIZED", d_out, ref, 0.0, 1e-4);
 
-    cudaFree(d_in); cudaFree(d_out); free(h_in);
-    return 0;
+    const float naive_ms = bench::time_ms(naive), opt_ms = bench::time_ms(opt);
+    std::printf("CUDA_NAIVE_MS=%.6f\nCUDA_OPTIMIZED_MS=%.6f\n", naive_ms, opt_ms);
+    bench::print_gbps("OPTIMIZED_GBPS", (double)N * sizeof(float), opt_ms);
+    std::printf("N=%d\n", N);
+
+    cudaFree(d_in); cudaFree(d_out);
+    return ok ? 0 : 1;
 }

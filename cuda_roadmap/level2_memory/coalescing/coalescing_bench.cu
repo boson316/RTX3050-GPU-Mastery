@@ -1,63 +1,56 @@
 /*
- * Level 2: Memory Coalescing — Naive (strided read) vs Optimized (coalesced read)
- * Copies input to output; we measure bandwidth. Strided = thread i reads [i*stride].
- * Outputs: CUDA_NAIVE_MS=... CUDA_OPTIMIZED_MS=...
+ * Level 2: Memory coalescing. Both kernels copy ALL N floats exactly once; only the
+ * mapping thread -> element differs, so the GB/s numbers are directly comparable.
+ *   coalesced: thread i copies element i -> a warp touches 32 consecutive floats = 1 x 128 B
+ *   strided:   thread i copies element (i % R) * STRIDE + i / R   (R = N / STRIDE)
+ *              -> the 32 lanes of a warp are STRIDE*4 bytes apart = 32 separate 32 B sectors,
+ *              so each 4-byte access drags a whole sector through the memory system (8x waste).
+ * (The previous version had the strided kernel copy only N/STRIDE elements, so it did 256x
+ *  less work than the coalesced one and the comparison was meaningless.)
  */
-#include <stdio.h>
-#include <cuda_runtime.h>
+#include "../../common/bench_common.cuh"
 
-#define CUDA_CHECK(call) do { \
-    cudaError_t err = (call); \
-    if (err != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d\n", cudaGetErrorString(err), __FILE__, __LINE__); exit(1); } \
-} while(0)
+const int N = 1 << 24;   // 64 MB per buffer: far larger than the 2 MB L2
+const int STRIDE = 32;
 
-const int N = 1 << 20;  // 1M floats
-const int STRIDE = 256; // bad: each warp touches 256 separate cache lines
-
-// Naive (bad): strided access — thread i reads in[i*STRIDE], writes out[i*STRIDE]
-__global__ void copy_strided(const float* __restrict__ in, float* __restrict__ out, int n, int stride) {
+__global__ void copy_strided(const float* __restrict__ in, float* __restrict__ out, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int idx = i * stride;
-    if (idx < n) out[idx] = in[idx];
+    const int rows = n / STRIDE;
+    if (i < n) {
+        int idx = (i % rows) * STRIDE + i / rows;  // a permutation of [0, n)
+        out[idx] = in[idx];
+    }
 }
 
-// Optimized (good): coalesced — thread i reads in[i], writes out[i]
 __global__ void copy_coalesced(const float* __restrict__ in, float* __restrict__ out, int n) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) out[i] = in[i];
 }
 
 int main() {
-    size_t size = (size_t)N * sizeof(float);
+    static_assert(N % STRIDE == 0, "N must be a multiple of STRIDE");
+    const size_t bytes = (size_t)N * sizeof(float);
+    auto h = bench::random_vector(N, 3);
+    std::vector<double> ref(h.begin(), h.end());
+
     float *d_in, *d_out;
-    CUDA_CHECK(cudaMalloc(&d_in, size));
-    CUDA_CHECK(cudaMalloc(&d_out, size));
-    float *h = (float*)malloc(size);
-    for (int i = 0; i < N; i++) h[i] = (float)i;
-    CUDA_CHECK(cudaMemcpy(d_in, h, size, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&d_in, bytes)); CUDA_CHECK(cudaMalloc(&d_out, bytes));
+    CUDA_CHECK(cudaMemcpy(d_in, h.data(), bytes, cudaMemcpyHostToDevice));
 
-    int n_strided = N / STRIDE;  // number of elements we actually touch in strided
-    int block = 256, grid_std = (n_strided + block - 1) / block;
-    int grid_co = (N + block - 1) / block;
+    const int block = 256, grid = (N + block - 1) / block;
+    auto strided = [&] { copy_strided<<<grid, block>>>(d_in, d_out, N); };
+    auto coalesced = [&] { copy_coalesced<<<grid, block>>>(d_in, d_out, N); };
 
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start)); CUDA_CHECK(cudaEventCreate(&stop));
+    bool ok = true;
+    CUDA_CHECK(cudaMemset(d_out, 0, bytes)); strided();   ok &= bench::verify("NAIVE", d_out, ref, 0, 0);
+    CUDA_CHECK(cudaMemset(d_out, 0, bytes)); coalesced(); ok &= bench::verify("OPTIMIZED", d_out, ref, 0, 0);
 
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int r = 0; r < 20; r++) copy_strided<<<grid_std, block>>>(d_in, d_out, N, STRIDE);
-    CUDA_CHECK(cudaGetLastError()); CUDA_CHECK(cudaEventRecord(stop, 0)); CUDA_CHECK(cudaEventSynchronize(stop));
-    float naive_ms = 0.f; CUDA_CHECK(cudaEventElapsedTime(&naive_ms, start, stop)); naive_ms /= 20.f;
+    const float naive_ms = bench::time_ms(strided), opt_ms = bench::time_ms(coalesced);
+    std::printf("CUDA_NAIVE_MS=%.6f\nCUDA_OPTIMIZED_MS=%.6f\n", naive_ms, opt_ms);
+    bench::print_gbps("NAIVE_GBPS", 2.0 * bytes, naive_ms);
+    bench::print_gbps("OPTIMIZED_GBPS", 2.0 * bytes, opt_ms);
+    std::printf("N=%d STRIDE=%d\n", N, STRIDE);
 
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    for (int r = 0; r < 20; r++) copy_coalesced<<<grid_co, block>>>(d_in, d_out, N);
-    CUDA_CHECK(cudaGetLastError()); CUDA_CHECK(cudaEventRecord(stop, 0)); CUDA_CHECK(cudaEventSynchronize(stop));
-    float opt_ms = 0.f; CUDA_CHECK(cudaEventElapsedTime(&opt_ms, start, stop)); opt_ms /= 20.f;
-
-    printf("CUDA_NAIVE_MS=%.6f\n", naive_ms);
-    printf("CUDA_OPTIMIZED_MS=%.6f\n", opt_ms);
-    printf("N=%d STRIDE=%d\n", N, STRIDE);
-
-    cudaEventDestroy(start); cudaEventDestroy(stop);
-    cudaFree(d_in); cudaFree(d_out); free(h);
-    return 0;
+    cudaFree(d_in); cudaFree(d_out);
+    return ok ? 0 : 1;
 }

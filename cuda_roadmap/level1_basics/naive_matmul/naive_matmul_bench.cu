@@ -1,78 +1,59 @@
 /*
- * Level 1: Naive Matrix Multiply — Naive only (Level 2 has tiled optimized)
- * C = A*B, each thread one output, all reads from global memory.
- * Outputs: CUDA_NAIVE_MS=... (OPTIMIZED same as naive for level1; level2 has tiled)
+ * Level 1: Naive SGEMM  C = A @ B  (N x N, FP32), one thread per output element.
+ * Every thread streams a full row of A and column of B from global memory: 2*N loads per
+ * 2*N FLOPs -> arithmetic intensity ~0.25 FLOP/byte before caching, far left of the
+ * RTX 3050's ridge point (~23 FLOP/byte), i.e. memory-bound. Level 2 fixes this with tiling.
+ *
+ * The CPU reference uses the cache-friendly i-k-j loop order so the "speedup vs CPU" number
+ * is not inflated by a deliberately slow baseline.
  */
-#include <stdio.h>
-#include <stdlib.h>
 #include <chrono>
-#include <cuda_runtime.h>
-
-#define CUDA_CHECK(call) do { \
-    cudaError_t err = (call); \
-    if (err != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d\n", cudaGetErrorString(err), __FILE__, __LINE__); exit(1); } \
-} while(0)
-
-static double get_time_ms() {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
+#include "../../common/bench_common.cuh"
 
 const int N = 1024;
-
-void matmul_cpu(const float* A, const float* B, float* C, int n) {
-    for (int row = 0; row < n; row++)
-        for (int col = 0; col < n; col++) {
-            float sum = 0;
-            for (int k = 0; k < n; k++) sum += A[row*n+k] * B[k*n+col];
-            C[row*n+col] = sum;
-        }
-}
 
 __global__ void matmul_naive(const float* A, const float* B, float* C, int n) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    float sum = 0;
     if (row < n && col < n) {
-        for (int k = 0; k < n; k++) sum += A[row*n+k] * B[k*n+col];
-        C[row*n+col] = sum;
+        float sum = 0.f;
+        for (int k = 0; k < n; k++) sum += A[row * n + k] * B[k * n + col];
+        C[row * n + col] = sum;
     }
 }
 
-int main() {
-    size_t size = (size_t)N * N * sizeof(float);
-    float *h_A = (float*)malloc(size), *h_B = (float*)malloc(size);
-    float *h_C_cpu = (float*)malloc(size), *h_C_gpu = (float*)malloc(size);
-    srand(12345);
-    for (int i = 0; i < N*N; i++) { h_A[i] = rand()/(float)RAND_MAX; h_B[i] = rand()/(float)RAND_MAX; }
+static void matmul_cpu(const std::vector<float>& A, const std::vector<float>& B, std::vector<double>& C, int n) {
+    std::fill(C.begin(), C.end(), 0.0);
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < n; k++) {
+            const double a = A[(size_t)i * n + k];
+            for (int j = 0; j < n; j++) C[(size_t)i * n + j] += a * B[(size_t)k * n + j];
+        }
+}
 
-    double t0 = get_time_ms();
-    matmul_cpu(h_A, h_B, h_C_cpu, N);
-    float cpu_ms = (float)(get_time_ms() - t0);
+int main() {
+    const size_t bytes = (size_t)N * N * sizeof(float);
+    auto h_A = bench::random_vector((size_t)N * N, 11), h_B = bench::random_vector((size_t)N * N, 12);
+    std::vector<double> ref((size_t)N * N);
+    auto t0 = std::chrono::steady_clock::now();
+    matmul_cpu(h_A, h_B, ref, N);
+    const double cpu_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
     float *d_A, *d_B, *d_C;
-    CUDA_CHECK(cudaMalloc(&d_A, size)); CUDA_CHECK(cudaMalloc(&d_B, size)); CUDA_CHECK(cudaMalloc(&d_C, size));
-    CUDA_CHECK(cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&d_A, bytes)); CUDA_CHECK(cudaMalloc(&d_B, bytes)); CUDA_CHECK(cudaMalloc(&d_C, bytes));
+    CUDA_CHECK(cudaMemcpy(d_A, h_A.data(), bytes, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_B, h_B.data(), bytes, cudaMemcpyHostToDevice));
 
-    dim3 block(16, 16), grid((N+15)/16, (N+15)/16);
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start)); CUDA_CHECK(cudaEventCreate(&stop));
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    matmul_naive<<<grid, block>>>(d_A, d_B, d_C, N);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(stop, 0));
-    CUDA_CHECK(cudaEventSynchronize(stop));
-    float gpu_ms = 0.f;
-    CUDA_CHECK(cudaEventElapsedTime(&gpu_ms, start, stop));
-    CUDA_CHECK(cudaMemcpy(h_C_gpu, d_C, size, cudaMemcpyDeviceToHost));
+    dim3 block(16, 16), grid((N + 15) / 16, (N + 15) / 16);
+    auto naive = [&] { matmul_naive<<<grid, block>>>(d_A, d_B, d_C, N); };
+    naive();
+    const bool ok = bench::verify("NAIVE", d_C, ref, 1e-3, 1e-4);
 
-    printf("CPU_MS=%.6f\n", cpu_ms);
-    printf("CUDA_NAIVE_MS=%.6f\n", gpu_ms);
-    printf("CUDA_OPTIMIZED_MS=%.6f\n", gpu_ms);  // Level1: no optimized; Level2 has tiled
-    printf("N=%d\n", N);
+    const float gpu_ms = bench::time_ms(naive);
+    std::printf("CPU_MS=%.6f\nCUDA_NAIVE_MS=%.6f\n", cpu_ms, gpu_ms);
+    bench::print_gflops("NAIVE_GFLOPS", 2.0 * N * N * N, gpu_ms);
+    std::printf("N=%d\n", N);
 
-    cudaEventDestroy(start); cudaEventDestroy(stop);
     cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
-    free(h_A); free(h_B); free(h_C_cpu); free(h_C_gpu);
-    return 0;
+    return ok ? 0 : 1;
 }

@@ -1,21 +1,19 @@
 /*
- * Level 3: Warp shuffle reduction — Naive (shared memory tree) vs Optimized (__shfl_down_sync)
- * Outputs: CUDA_NAIVE_MS=... CUDA_OPTIMIZED_MS=...
+ * Level 3: Block reduction - shared-memory tree vs warp shuffle (N = 2^24 floats).
+ *   naive:     8-step tree in shared memory, __syncthreads() after every step
+ *   optimized: grid-stride accumulation in registers (each thread sums many elements),
+ *              then __shfl_down_sync inside each warp (no shared memory, no block barrier),
+ *              one shared-memory exchange between warps, one atomicAdd per block.
+ * The optimized kernel launches only enough blocks to fill the GPU, which removes most
+ * of the per-block overhead; it should run close to DRAM bandwidth.
  */
-#include <stdio.h>
-#include <cuda_runtime.h>
+#include "../../common/bench_common.cuh"
 
-#define CUDA_CHECK(call) do { \
-    cudaError_t err = (call); \
-    if (err != cudaSuccess) { fprintf(stderr, "CUDA error %s at %s:%d\n", cudaGetErrorString(err), __FILE__, __LINE__); exit(1); } \
-} while(0)
-
-const int N = 1 << 20;
+const int N = 1 << 24;
 #define BLOCK 256
 
-// Naive: full tree reduction in shared memory
 __global__ void reduce_shared(const float* input, float* output, int n) {
-    extern __shared__ float sdata[];
+    __shared__ float sdata[BLOCK];
     int tid = threadIdx.x;
     int i = blockIdx.x * BLOCK + tid;
     sdata[tid] = (i < n) ? input[i] : 0.f;
@@ -24,57 +22,58 @@ __global__ void reduce_shared(const float* input, float* output, int n) {
         if (tid < s) sdata[tid] += sdata[tid + s];
         __syncthreads();
     }
-    if (tid == 0) output[blockIdx.x] = sdata[0];
+    if (tid == 0) atomicAdd(output, sdata[0]);
 }
 
-// Optimized: warp shuffle for the last 32 elements (no shared memory for warp level)
 __device__ __forceinline__ float warp_reduce(float val) {
-    for (int offset = 32 / 2; offset > 0; offset >>= 1)
-        val += __shfl_down_sync(0xffffffff, val, offset);
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1) val += __shfl_down_sync(0xffffffff, val, offset);
     return val;
 }
 
 __global__ void reduce_warp_shuffle(const float* input, float* output, int n) {
-    __shared__ float sdata[32];  // one value per warp
-    int tid = threadIdx.x;
-    int i = blockIdx.x * BLOCK + tid;
-    float val = (i < n) ? input[i] : 0.f;
-    int lane = tid % 32;
-    int wid = tid / 32;
-    val = warp_reduce(val);
-    if (lane == 0) sdata[wid] = val;
+    __shared__ float warp_sums[BLOCK / 32];
+    float val = 0.f;
+    for (int i = blockIdx.x * BLOCK + threadIdx.x; i < n; i += gridDim.x * BLOCK) val += input[i];
+    const int lane = threadIdx.x % 32, wid = threadIdx.x / 32;
+    val = warp_reduce(val);  // all 32 lanes of every warp participate
+    if (lane == 0) warp_sums[wid] = val;
     __syncthreads();
-    if (tid < 32) val = (tid < (BLOCK + 31) / 32) ? sdata[tid] : 0.f;
-    if (tid < 32) val = warp_reduce(val);
-    if (tid == 0) output[blockIdx.x] = val;
+    if (wid == 0) {  // the WHOLE first warp runs the second stage (full mask is valid)
+        val = lane < BLOCK / 32 ? warp_sums[lane] : 0.f;
+        val = warp_reduce(val);
+        if (lane == 0) atomicAdd(output, val);
+    }
 }
 
 int main() {
-    int nBlocks = (N + BLOCK - 1) / BLOCK;
+    auto h_in = bench::random_vector(N, 9, 0.f, 1.f);
+    double sum = 0; for (float v : h_in) sum += v;
+    const std::vector<double> ref{sum};
+
     float *d_in, *d_out;
     CUDA_CHECK(cudaMalloc(&d_in, (size_t)N * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_out, (size_t)nBlocks * sizeof(float)));
-    float *h_in = (float*)malloc((size_t)N * sizeof(float));
-    for (int i = 0; i < N; i++) h_in[i] = 1.0f;
-    CUDA_CHECK(cudaMemcpy(d_in, h_in, (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMalloc(&d_out, sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_in, h_in.data(), (size_t)N * sizeof(float), cudaMemcpyHostToDevice));
 
-    cudaEvent_t start, stop;
-    CUDA_CHECK(cudaEventCreate(&start)); CUDA_CHECK(cudaEventCreate(&stop));
+    int num_sms = 0, blocks_per_sm = 0;
+    CUDA_CHECK(cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0));
+    CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, reduce_warp_shuffle, BLOCK, 0));
+    const int grid_shfl = num_sms * blocks_per_sm;
 
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    reduce_shared<<<nBlocks, BLOCK, BLOCK*sizeof(float)>>>(d_in, d_out, N);
-    CUDA_CHECK(cudaGetLastError()); CUDA_CHECK(cudaEventRecord(stop, 0)); CUDA_CHECK(cudaEventSynchronize(stop));
-    float naive_ms = 0.f; CUDA_CHECK(cudaEventElapsedTime(&naive_ms, start, stop));
+    auto naive = [&] { cudaMemsetAsync(d_out, 0, sizeof(float)); reduce_shared<<<(N + BLOCK - 1) / BLOCK, BLOCK>>>(d_in, d_out, N); };
+    auto opt = [&] { cudaMemsetAsync(d_out, 0, sizeof(float)); reduce_warp_shuffle<<<grid_shfl, BLOCK>>>(d_in, d_out, N); };
 
-    CUDA_CHECK(cudaEventRecord(start, 0));
-    reduce_warp_shuffle<<<nBlocks, BLOCK>>>(d_in, d_out, N);
-    CUDA_CHECK(cudaGetLastError()); CUDA_CHECK(cudaEventRecord(stop, 0)); CUDA_CHECK(cudaEventSynchronize(stop));
-    float opt_ms = 0.f; CUDA_CHECK(cudaEventElapsedTime(&opt_ms, start, stop));
+    bool ok = true;
+    naive(); ok &= bench::verify("NAIVE", d_out, ref, 0.0, 1e-4);
+    opt();   ok &= bench::verify("OPTIMIZED", d_out, ref, 0.0, 1e-4);
 
-    printf("CUDA_NAIVE_MS=%.6f\n", naive_ms);
-    printf("CUDA_OPTIMIZED_MS=%.6f\n", opt_ms);
-    printf("N=%d\n", N);
-    cudaEventDestroy(start); cudaEventDestroy(stop);
-    cudaFree(d_in); cudaFree(d_out); free(h_in);
-    return 0;
+    const float naive_ms = bench::time_ms(naive), opt_ms = bench::time_ms(opt);
+    std::printf("CUDA_NAIVE_MS=%.6f\nCUDA_OPTIMIZED_MS=%.6f\n", naive_ms, opt_ms);
+    bench::print_gbps("NAIVE_GBPS", (double)N * sizeof(float), naive_ms);
+    bench::print_gbps("OPTIMIZED_GBPS", (double)N * sizeof(float), opt_ms);
+    std::printf("N=%d GRID_OPTIMIZED=%d\n", N, grid_shfl);
+
+    cudaFree(d_in); cudaFree(d_out);
+    return ok ? 0 : 1;
 }

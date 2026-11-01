@@ -45,15 +45,15 @@ set NVCC=nvcc
 set ARCH=sm_86
 if defined CUDA_ARCH set ARCH=%CUDA_ARCH%
 
-call "%NVCC%" -arch=%ARCH% -o level1_basics\vector_add\vector_add_bench level1_basics\vector_add\vector_add_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level1_basics\reduction\reduction_bench level1_basics\reduction\reduction_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level1_basics\naive_matmul\naive_matmul_bench level1_basics\naive_matmul\naive_matmul_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level2_memory\tiled_matmul\tiled_matmul_bench level2_memory\tiled_matmul\tiled_matmul_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level2_memory\coalescing\coalescing_bench level2_memory\coalescing\coalescing_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level2_memory\bank_conflict\bank_conflict_bench level2_memory\bank_conflict\bank_conflict_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level3_advanced\warp_shuffle_reduction\warp_shuffle_bench level3_advanced\warp_shuffle_reduction\warp_shuffle_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level3_advanced\fused_ops\fused_ops_bench level3_advanced\fused_ops\fused_ops_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level3_advanced\persistent_kernel\persistent_kernel_bench level3_advanced\persistent_kernel\persistent_kernel_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench.cu -allow-unsupported-compiler
-call "%NVCC%" -arch=%ARCH% -o level4_tensor_core\wmma_example\wmma_example level4_tensor_core\wmma_example\wmma_example.cu -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level1_basics\vector_add\vector_add_bench level1_basics\vector_add\vector_add_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level1_basics\reduction\reduction_bench level1_basics\reduction\reduction_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level1_basics\naive_matmul\naive_matmul_bench level1_basics\naive_matmul\naive_matmul_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level2_memory\tiled_matmul\tiled_matmul_bench level2_memory\tiled_matmul\tiled_matmul_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level2_memory\coalescing\coalescing_bench level2_memory\coalescing\coalescing_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level2_memory\bank_conflict\bank_conflict_bench level2_memory\bank_conflict\bank_conflict_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level3_advanced\warp_shuffle_reduction\warp_shuffle_bench level3_advanced\warp_shuffle_reduction\warp_shuffle_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level3_advanced\fused_ops\fused_ops_bench level3_advanced\fused_ops\fused_ops_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level3_advanced\persistent_kernel\persistent_kernel_bench level3_advanced\persistent_kernel\persistent_kernel_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench.cu -lcublas -allow-unsupported-compiler
+call "%NVCC%" -O3 -std=c++17 -arch=%ARCH% -o level4_tensor_core\wmma_example\wmma_example level4_tensor_core\wmma_example\wmma_example.cu -lcublas -allow-unsupported-compiler
 echo Done. Run: python run_benchmarks.py
