@@ -20,11 +20,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent  # profiling/roofline_analysis.py -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
+import os
+
 import torch
 
-# RTX 3050 Laptop: FP16 peak ~9 TFLOPS, memory BW ~192 GB/s
-PEAK_GFLOPS = float(__import__("os").environ.get("ROOFLINE_PEAK_GFLOPS", "9000"))
-PEAK_GBPS = float(__import__("os").environ.get("ROOFLINE_PEAK_GBPS", "192"))
+from benchmarks.gpu_specs import query as _query_specs
+
+# Roof = FP16 Tensor Core with FP32 accumulation (what cuBLAS / tl.dot use for FP16 inputs),
+# derived from the device's SM count and clocks (benchmarks/gpu_specs.py). An earlier version
+# hard-coded 9 TFLOPS, which put the measured cuBLAS matmul points above the roof.
+_specs = _query_specs()
+PEAK_GFLOPS = float(os.environ.get("ROOFLINE_PEAK_GFLOPS", 0)) or (
+    (_specs.peak_tflops("fp16_tc_fp32acc") or 0) * 1e3 if _specs else 0) or 15900.0
+PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram_gbs() or 0) if _specs else 0) or 168.0
 RIDGE_AI = PEAK_GFLOPS / PEAK_GBPS  # FLOPs/byte
 
 OUT_DIR = REPO_ROOT / "profiling" / "roofline"
@@ -423,42 +431,42 @@ def plot_roofline(all_results):
         return
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Roofline curve: perf = min(PEAK_GBPS * AI, PEAK_GFLOPS)
     ridge = RIDGE_AI
-    xs_curve = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]
+    xs_curve = sorted([10 ** (e / 10) for e in range(-20, 36)] + [ridge])  # 0.01 .. ~3000 FLOP/byte
     ys_curve = [min(PEAK_GBPS * x, PEAK_GFLOPS) for x in xs_curve]
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(11, 6.5))
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.plot(xs_curve, ys_curve, "k-", linewidth=2, label="Roofline")
-    ax.axvline(ridge, color="gray", linestyle="--", alpha=0.7, label=f"Ridge (AI={ridge:.1f})")
+    ax.plot(xs_curve, ys_curve, color="black", linewidth=2, label="Roofline (FP16 Tensor Core, FP32 acc)")
+    ax.axvline(ridge, color="gray", linestyle="--", alpha=0.7, label=f"Ridge point (AI = {ridge:.0f} FLOP/byte)")
 
-    # Points: use achieved_gflops for y; arithmetic_intensity for x
-    memory_bound = [r for r in all_results if r.get("is_memory_bound", True)]
-    compute_bound = [r for r in all_results if not r.get("is_memory_bound", False)]
+    styles = {"PyTorch": ("o", "#1f77b4"), "Triton": ("s", "#ff7f0e"), "CUDA": ("^", "#2ca02c")}
+    seen = set()
+    for r in all_results:
+        ai = r["arithmetic_intensity"]
+        # Recompute from FLOPs and latency (elementwise kernels were stored with 0 GFLOPS before).
+        perf = r["flops"] / (r["latency_ms"] * 1e-3) / 1e9 if r.get("latency_ms") else r.get("achieved_gflops")
+        if not ai or not perf:
+            continue
+        marker, color = styles.get(r["implementation"], ("D", "gray"))
+        label = r["implementation"] if r["implementation"] not in seen else None
+        seen.add(r["implementation"])
+        ax.scatter([ai], [perf], marker=marker, c=color, s=60, edgecolors="black", linewidths=0.5, label=label, zorder=3)
+        roof = min(PEAK_GBPS * ai, PEAK_GFLOPS)
+        name = r["config"] if r["kernel"] == "transformer" else f"{r['kernel']} {r['config']}"
+        ax.annotate(f"{name} ({100 * perf / roof:.0f}%)", (ai, perf), textcoords="offset points", xytext=(5, -10),
+                    fontsize=7, alpha=0.8)
 
-    for r in memory_bound:
-        ai = max(r["arithmetic_intensity"], 0.01)
-        perf = r.get("achieved_gflops") or 0.01
-        ax.scatter([ai], [perf], c="C0", s=60, marker="o", alpha=0.8, edgecolors="black", linewidths=0.5)
-
-    for r in compute_bound:
-        ai = max(r["arithmetic_intensity"], 0.01)
-        perf = r.get("achieved_gflops") or 0.01
-        ax.scatter([ai], [perf], c="C1", s=60, marker="s", alpha=0.8, edgecolors="black", linewidths=0.5)
-
-    # Legend: single markers for memory vs compute
-    ax.scatter([], [], c="C0", s=80, marker="o", label="Memory-bound", edgecolors="black")
-    ax.scatter([], [], c="C1", s=80, marker="s", label="Compute-bound", edgecolors="black")
-
-    ax.set_xlabel("Arithmetic intensity (FLOPs/byte)")
-    ax.set_ylabel("Performance (GFLOPS)")
-    ax.set_title(f"Roofline model — RTX 3050 (peak {PEAK_GFLOPS:.0f} GFLOPS, {PEAK_GBPS:.0f} GB/s)")
+    ax.text(ridge * 0.6, PEAK_GFLOPS * 0.02, "memory-bound", ha="right", fontsize=10, color="gray")
+    ax.text(ridge * 1.6, PEAK_GFLOPS * 0.02, "compute-bound", ha="left", fontsize=10, color="gray")
+    ax.set_xlabel("Arithmetic intensity (FLOPs / DRAM byte, compulsory traffic)")
+    ax.set_ylabel("Achieved GFLOPS")
+    ax.set_title(f"Roofline - {PEAK_GFLOPS / 1e3:.1f} TFLOPS FP16 TC, {PEAK_GBPS:.0f} GB/s  (labels: % of roof)")
     ax.legend(loc="lower right", fontsize=9)
-    ax.grid(True, alpha=0.3)
-    ax.set_xlim(left=0.008)
+    ax.grid(True, which="both", alpha=0.25)
+    ax.set_xlim(0.3, 3000)
+    ax.set_ylim(10, PEAK_GFLOPS * 2)
     fig.tight_layout()
     out_path = OUT_DIR / "roofline_plot.png"
     fig.savefig(out_path, dpi=150, bbox_inches="tight")

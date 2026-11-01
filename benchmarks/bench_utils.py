@@ -41,25 +41,24 @@ class BenchmarkError(RuntimeError):
     """Raised when a kernel's output is wrong or its measured throughput is physically impossible."""
 
 
-# Theoretical peaks used for the plausibility check. RTX 3050 Laptop (GA107, 16 SMs):
-#   FP16 Tensor Core, FP32 accumulate: 16 SM x 512 FLOP/clk x ~1.74 GHz  ~= 14.3 TFLOPS
-#   FP16 Tensor Core, FP16 accumulate: 2x that                          ~= 28.5 TFLOPS
-#   DRAM: 128-bit GDDR6 @ 12-14 Gbps                                    = 192-224 GB/s
-# A measurement above the absolute ceiling (with 15% slack for boost clocks) means the
-# kernel did not do the work it claims - e.g. a failed launch timed as a 0.5 us kernel.
-DEVICE_PEAKS = {
-    "RTX 3050": {"tflops_ceiling": 28.5, "dram_gbs": 224.0},
-}
-
-
 def device_peaks() -> dict | None:
-    if not torch.cuda.is_available():
+    """
+    Absolute ceilings for the plausibility check, derived from the device (benchmarks/gpu_specs.py):
+    the fastest datapath (FP16 Tensor Core, FP16 accumulate) and the DRAM bandwidth. A measurement
+    above the ceiling means the kernel did not do the work it claims - e.g. a failed launch timed
+    as a 0.5 us kernel. Returns None if the specs cannot be determined (check skipped).
+    """
+    try:
+        from benchmarks.gpu_specs import query
+    except ImportError:
         return None
-    name = torch.cuda.get_device_name(0)
-    for key, peaks in DEVICE_PEAKS.items():
-        if key in name:
-            return peaks
-    return None
+    s = query()
+    if s is None:
+        return None
+    tflops, bw = s.peak_tflops("fp16_tc_fp16acc"), s.peak_dram_gbs()
+    if tflops is None or bw is None:
+        return None
+    return {"tflops_ceiling": tflops, "dram_gbs": bw}
 
 
 def run_bench(
