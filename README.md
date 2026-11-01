@@ -290,7 +290,7 @@ flowchart LR
 ### Run
 
 ```bash
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 ```
 
 Env: `TRANSFORMER_BENCHMARK_FULL=1` (larger B/S), `TRANSFORMER_BENCHMARK_CUDA=1` (custom CUDA).  
@@ -343,16 +343,16 @@ Charts are generated under `benchmarks/plots/` and `benchmarks/` after running b
 
 | Script | Output |
 |--------|--------|
-| `benchmarks/matmul_benchmark.py` | PyTorch vs Triton matmul; GFLOPS |
-| `benchmarks/conv_benchmark.py` | torch vs Extension vs Triton |
-| `benchmarks/attention_benchmark.py` | SDPA vs Triton Flash |
-| `benchmarks/transformer_benchmark.py` | Per-kernel latency & bandwidth |
+| `benchmarks/benchmark_matmul.py` | PyTorch vs Triton matmul; GFLOPS |
+| `benchmarks/benchmark_conv.py` | torch vs Extension vs Triton |
+| `benchmarks/benchmark_attention.py` | SDPA vs Triton Flash |
+| `benchmarks/benchmark_transformer.py` | Per-kernel latency & bandwidth |
 | `benchmarks/generate_charts.py` | Aggregate charts |
 
 ```bash
-python benchmarks/matmul_benchmark.py
-python benchmarks/conv_benchmark.py
-python benchmarks/attention_benchmark.py
+python benchmarks/benchmark_matmul.py
+python benchmarks/benchmark_conv.py
+python benchmarks/benchmark_attention.py
 python benchmarks/generate_charts.py   # add --skip-mnist to skip training
 ```
 

@@ -290,7 +290,7 @@ flowchart LR
 ### 執行方式
 
 ```bash
-python benchmarks/transformer_benchmark.py
+python benchmarks/benchmark_transformer.py
 ```
 
 可設 `TRANSFORMER_BENCHMARK_FULL=1`（較大 B/S）、`TRANSFORMER_BENCHMARK_CUDA=1`（啟用自訂 CUDA）。  
@@ -343,25 +343,25 @@ python benchmarks/transformer_benchmark.py
 
 | 腳本 | 輸出 / 圖 |
 |------|-----------|
-| `benchmarks/matmul_benchmark.py` | PyTorch vs Triton matmul；GFLOPS |
-| `benchmarks/conv_benchmark.py` | torch vs Extension vs Triton → 如 `conv_benchmark.png` |
-| `benchmarks/attention_benchmark.py` | SDPA vs Triton Flash |
-| `benchmarks/transformer_benchmark.py` | QKV / Softmax / LayerNorm / GELU / MLP 延遲與頻寬 |
+| `benchmarks/benchmark_matmul.py` | PyTorch vs Triton matmul；GFLOPS |
+| `benchmarks/benchmark_conv.py` | torch vs Extension vs Triton → 如 `conv_benchmark.png` |
+| `benchmarks/benchmark_attention.py` | SDPA vs Triton Flash |
+| `benchmarks/benchmark_transformer.py` | QKV / Softmax / LayerNorm / GELU / MLP 延遲與頻寬 |
 | `benchmarks/generate_charts.py` | 彙總產生多張圖表 |
 
 ### 圖表對照
 
 | 圖表 | 腳本 / 路徑 | 說明 |
 |------|-------------|------|
-| **Matrix mul 521×** | `benchmarks/matmul_benchmark.py` → `matrix_mul_speedup.png` | CPU vs GPU 時間、加速比 (N=1024) |
+| **Matrix mul 521×** | `benchmarks/benchmark_matmul.py` → `matrix_mul_speedup.png` | CPU vs GPU 時間、加速比 (N=1024) |
 | **MNIST 99%** | `extension/mnist_custom_conv.py` → `mnist_acc_loss.png` | 訓練/測試 loss 與準確率 |
-| **Conv 比較** | `benchmarks/conv_benchmark.py` → `conv_benchmark.png` | torch vs Extension vs Triton |
+| **Conv 比較** | `benchmarks/benchmark_conv.py` → `conv_benchmark.png` | torch vs Extension vs Triton |
 | **Roofline** | `profiling/roofline_analysis/plot_roofline.py` → `roofline_model.png` | Memory-bound vs compute-bound |
 
 ```bash
-python benchmarks/matmul_benchmark.py
-python benchmarks/conv_benchmark.py
-python benchmarks/attention_benchmark.py
+python benchmarks/benchmark_matmul.py
+python benchmarks/benchmark_conv.py
+python benchmarks/benchmark_attention.py
 python benchmarks/generate_charts.py   # 可加 --skip-mnist
 ```
 
@@ -490,7 +490,6 @@ RTX3050-GPU-Mastery/
 ├── flash_attention_simple/ # FlashAttention：PyTorch、CUDA、Triton
 ├── extension/              # PyTorch CUDA Extension（conv）
 ├── requirements.txt
-└── README.legacy.md        # 舊版對照
 ```
 
 ---
