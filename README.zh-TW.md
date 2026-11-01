@@ -1,574 +1,147 @@
 <p align="center">
-  <a href="https://developer.nvidia.com/cuda-toolkit"><img src="https://img.shields.io/badge/CUDA-12.4-76b900?style=flat-square&logo=nvidia" alt="CUDA"/></a>
-  <a href="https://pytorch.org"><img src="https://img.shields.io/badge/PyTorch-2.4%20%7C%20cu124-ee4c2c?style=flat-square&logo=pytorch" alt="PyTorch"/></a>
-  <a href="https://github.com/openai/triton"><img src="https://img.shields.io/badge/Triton-JIT%20GPU%20Kernels-ff6b35?style=flat-square" alt="Triton"/></a>
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python" alt="Python"/>
-  <img src="https://img.shields.io/badge/GPU-RTX%203050%20%7C%20Ampere-76b900?style=flat-square&logo=nvidia" alt="RTX 3050"/>
+  <a href="https://github.com/boson316/RTX3050-GPU-Mastery/actions/workflows/ci.yml"><img src="https://github.com/boson316/RTX3050-GPU-Mastery/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <img src="https://img.shields.io/badge/CUDA-12.x-76b900?style=flat-square&logo=nvidia" alt="CUDA"/>
+  <img src="https://img.shields.io/badge/Triton-3.x-ff6b35?style=flat-square" alt="Triton"/>
+  <img src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?style=flat-square&logo=pytorch" alt="PyTorch"/>
+  <img src="https://img.shields.io/badge/GPU-RTX%203050%20Laptop%20(sm__86)-76b900?style=flat-square" alt="GPU"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="License"/></a>
 </p>
 
-<p align="center">
-  <strong>⚡ RTX 3050 GPU Optimization Lab</strong> — Hands-on <strong>GPU engineering portfolio</strong>: CUDA · Triton · FlashAttention · Transformer kernels · Nsight · Roofline.
-</p>
+# RTX 3050 GPU Kernel Lab
 
-<p align="center">
-  <strong>Languages:</strong> <a href="README.md">English</a> · <a href="README.zh-TW.md">中文</a>
-</p>
+**在 6GB 筆電 GPU 上手寫 CUDA 與 Triton kernel（GEMM、FlashAttention、Transformer 區塊、卷積），並附上一套不需要 GPU 也能執行的驗證流程。**
 
-# ⚡ RTX 3050 GPU Optimization Lab
+**Languages:** [English](README.md) · 中文
 
-> 高效能 GPU 核心實驗室 — 以 **NVIDIA GeForce RTX 3050 Laptop (Ampere sm_86)** 為實測平台，從 CUDA 基礎到 Triton、FlashAttention、Transformer 核心的實作、優化與效能分析。適合作為 **GPU / 高效能計算** 作品集展示。
-
-舊版結構與重點見 [README.legacy.md](README.legacy.md)。English version: [README.md](README.md).
+大多數 GPU kernel 作品集只放加速比的圖。這個專案也呈現這些數字是怎麼被檢驗的：每個 kernel 計時前都先跟參考答案比對，量到的吞吐量會跟硬體理論峰值做合理性檢查，kernel 的邏輯則在沒有 GPU 的 CI 機器上測試。建立這套流程的過程中，找出了第一版裡十幾個真正的 bug 和方法論問題，其中包含兩個「比 PyTorch 快」的結果，事後證明都是因為 kernel 少算了一部分。完整紀錄在 **[docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md)**。
 
 ---
 
-## 📋 目錄
+## 亮點
 
-| # | 章節 |
-|---|------|
-| 1 | [專案概述](#1-專案概述) |
-| 2 | [GPU 架構說明](#2-gpu-架構說明) |
-| 3 | [CUDA 核心實驗](#3-cuda-核心實驗) |
-| 4 | [Triton 核心實驗](#4-triton-核心實驗) |
-| 5 | [FlashAttention 實作](#5-flashattention-實作) |
-| 6 | [Transformer GPU 核心](#6-transformer-gpu-核心) |
-| 7 | [效能基準測試](#7-效能基準測試) |
-| 8 | [Nsight 效能剖析](#8-nsight-效能剖析) |
-| 9 | [Roofline 分析](#9-roofline-分析) |
-| — | [安裝與一鍵重現](#-安裝與一鍵重現-easy-to-reproduce) · [Example commands](#example-commands-running-kernels) |
-
-**入門** → [docs/getting_started.md](docs/getting_started.md) · [文件索引](docs/INDEX.md) · [教學 Notebook](notebooks/README.md) · [**逐步教學 (tutorials/)**](tutorials/README.md) · [一鍵重現](scripts/README.md)
+| | 內容 | 位置 |
+|---|---|---|
+| ⚡ | **FlashAttention forward**：CUDA 版（每個 thread 負責一個 query row、K/V tile 放在 shared memory、用 `exp2` 做 online softmax、causal 時跳過整塊 tile）和 Triton 版（autotune、`tl.dot` 走 Tensor Core） | [`flash_attention_simple/`](flash_attention_simple)、[`triton_kernels/flash_attention/`](triton_kernels/flash_attention) |
+| 🧮 | **WMMA Tensor Core GEMM**：64×64×32 shared-memory block tile、4 個 warp 各算 2×2 fragment、128-bit 搬移、shared memory padding，成績以 **cuBLAS 的百分比**表示 | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
+| 🔗 | **Kernel fusion**：Triton linear 把 bias + GELU 融合進 epilogue（MLP 只需 2 次 launch）、online softmax（讀 2 次而不是 3 次）、Welford LayerNorm、把卷積寫成 9 次向量化 outer product | [`triton_kernels/`](triton_kernels)、[`gpu_kernels/transformer/`](gpu_kernels/transformer) |
+| 🧪 | **CI 上不需要 GPU 的驗證**：Triton interpreter 在 CPU 上執行真正的 kernel；自製的 **CUDA 執行模型模擬器**用 `std::thread` 跑每個 thread、用 `std::barrier` 模擬 `__syncthreads`、用 per-warp 交換區模擬 `__shfl_xor_sync`，直接執行真正的 `__global__` 程式碼。如果有 thread 沒走到 barrier，模擬器會直接死鎖，bug 藏不住 | [`tests/`](tests) |
+| 📈 | **由裝置推導峰值的 Roofline**：SM 數 × 每 clock FLOPs × NVML 查到的時脈。cuBLAS 在 2048³ 達到 Tensor Core roof 的 94% | [`profiling/`](profiling)、[`benchmarks/gpu_specs.py`](benchmarks/gpu_specs.py) |
+| 🐛 | **工程日誌**：data race、兩個死鎖、cuBLAS 越界讀取、WMMA 運算元被轉置、4 個 mask bug、不公平的 baseline。每個都附根本原因、修法和回歸測試 | [`docs/ENGINEERING_LOG.md`](docs/ENGINEERING_LOG.md) |
 
 ---
 
-## 1. 專案概述
-
-本實驗室專注於 **GPU 核心的撰寫、優化與剖析**，以 **RTX 3050 6GB** 為目標裝置，涵蓋從基礎 CUDA 到 Triton、FlashAttention 及 Transformer 相關核心，並透過 **Nsight** 與 **Roofline** 進行系統化效能分析。
+## 正確性優先
 
 ```mermaid
 flowchart LR
-    subgraph Input
-        A[PyTorch / NumPy]
-    end
-    subgraph Lab["GPU Optimization Lab"]
-        B[cuda_roadmap]
-        C[triton_kernels]
-        D[flash_attention_simple]
-        E[gpu_kernels]
-    end
-    subgraph Analysis
-        F[benchmarks]
-        G[Nsight]
-        H[Roofline]
-    end
-    A --> B & C & D & E
-    B & C & D & E --> F --> G & H
+    K[kernel] --> V{輸出 == 參考答案?}
+    V -- 否 --> X["[skip] WRONG RESULT，不計時"]
+    V -- 是 --> T["計時：CUDA events、<br/>warm-up、取中位數"]
+    T --> P{"≤ 裝置峰值？<br/>(SM × FLOP/clk × 時脈)"}
+    P -- 否 --> Y["BenchmarkError：<br/>物理上不可能"]
+    P -- 是 --> R[CSV / 報告 / roofline]
 ```
 
-| 模組 | 說明 |
-|------|------|
-| **cuda_roadmap** | 分級 CUDA 實驗：Vector add、Reduction、Naive/Tiled matmul、WMMA Tensor Core |
-| **triton_kernels** | Triton：matmul、conv、layernorm、softmax、flash_attention |
-| **flash_attention_simple** | FlashAttention：PyTorch 對照、CUDA、Triton |
-| **gpu_kernels** | 純 CUDA：vector_add、reduction、matrix_mul、conv2d、transformer |
-| **benchmarks / profiling** | 基準測試、Nsight 報告、Roofline 圖 |
+| 檢查 | 執行環境 | 涵蓋範圍 |
+|---|---|---|
+| `pytest` 搭配 `TRITON_INTERPRET=1` | CI，CPU | 所有 Triton kernel 對照 PyTorch：奇數形狀、非 2 次方的 `head_dim`、causal（46 個案例） |
+| `tests/cuda_emulation/run_all.sh` | CI，CPU | CUDA FlashAttention、softmax、LayerNorm、bias+GELU、conv3x3 對照 naive 參考實作（27 個案例） |
+| `nvcc -arch=sm_86 --Werror all-warnings` | CI | 每一個 `.cu` 檔 |
+| 自我驗證的 CUDA 執行檔（`VERIFY_*=PASS`） | GPU | 所有 roadmap kernel（含 WMMA）對照 CPU 參考答案 |
+| `bench_utils.measure()` | GPU | 每個 benchmark：驗證 → 計時 → 合理性檢查 |
 
 ---
 
-## 2. GPU 架構說明
+## 內容
 
-目標裝置：**NVIDIA GeForce RTX 3050 Laptop GPU** — Ampere (sm_86)，6GB GDDR6。
-
-### SM 與記憶體階層
-
-```mermaid
-graph TB
-    subgraph GPU["GPU (RTX 3050)"]
-        subgraph SM["Streaming Multiprocessor (SM)"]
-            W1[Warp 0]
-            W2[Warp 1]
-            W3[Warp ...]
-        end
-        subgraph Mem["Memory Hierarchy"]
-            L2[L2 Cache]
-            Global[Global Memory 6GB]
-        end
-    end
-    SM --> L2 --> Global
-```
-
-| 層級 | 範圍 | 延遲 (約) | 頻寬 | 在核心中的用途 |
-|------|------|-----------|------|----------------|
-| **Registers** | 每 thread | 0 cycle | 最高 | 區域變數、迴圈索引 |
-| **Shared memory** | 每 block | ~20–30 cycle | 很高 | Tiling、reduction |
-| **L1 / L2** | Per-SM / GPU | 變動 | 高 | 由 global 存取隱式使用 |
-| **Global (VRAM)** | GPU | 200–400 cycle | 較低 | 大張量、I/O |
-
-### RTX 3050 Laptop 規格
-
-| 項目 | 數值 |
-|------|------|
-| 架構 | Ampere (sm_86) |
-| FP32 峰值 | ~4.5 TFLOPS |
-| FP16 Tensor Core | ~9 TFLOPS |
-| 記憶體頻寬 | ~192 GB/s |
-| VRAM | 6 GB GDDR6 |
-
-### 優化策略對應
-
-```mermaid
-flowchart LR
-    subgraph Optimal["優化策略"]
-        A1[Tiling]
-        A2[Shared Memory]
-        A3[Coalesced Access]
-        A4[Bank Conflict 避免]
-    end
-    subgraph Target["目標"]
-        B1[算術強度 ↑]
-        B2[記憶體頻寬利用率 ↑]
-    end
-    A1 & A2 --> B1
-    A3 & A4 --> B2
-```
-
-詳見：[docs/gpu_memory_hierarchy.md](docs/gpu_memory_hierarchy.md)、[docs/optimization_guide.md](docs/optimization_guide.md)。
+| 模組 | 內容 | 關鍵技術 |
+|---|---|---|
+| [`cuda_roadmap/`](cuda_roadmap) | 11 個會自我驗證的 CUDA benchmark，Level 1–4 | coalescing、bank conflict（`[32][33]` 轉置）、warp shuffle reduction、fusion、grid-stride + occupancy API、WMMA |
+| [`triton_kernels/`](triton_kernels) | matmul、linear / QKV / MLP、softmax、LayerNorm、GELU、conv3x3、FlashAttention | 為 L2 重用設計的 grouped program order、`num_stages` pipelining、fused epilogue、autotune |
+| [`flash_attention_simple/`](flash_attention_simple) | CUDA FlashAttention（PyTorch extension + standalone） | online softmax、累加器常駐 register、有記錄的 register 預算（215 regs、0 spill） |
+| [`gpu_kernels/transformer/`](gpu_kernels/transformer) | QKV、softmax、LayerNorm、GELU、MLP 的 PyTorch CUDA extension | 用 `Yᵀ = WᵀXᵀ` 呼叫 row-major cuBLAS、fused bias+GELU epilogue、Welford 統計 |
+| [`extension/`](extension) | 3×3 卷積（C_in = 1、C_out = 32）PyTorch extension | 18×18 halo tile 給 32 個 channel × 9 個 tap 重用 |
+| [`benchmarks/`](benchmarks) | 有驗證的 benchmark 框架、裝置峰值查詢 | CUDA events、正確性閘門、合理性上限 |
+| [`profiling/`](profiling) | Roofline 分析、Nsight Compute / Systems 腳本 | 算術強度 vs 實測吞吐量 |
+| [`tests/`](tests) | Triton interpreter 測試、CUDA CPU 模擬器 | 見上方 |
 
 ---
 
-## 3. CUDA 核心實驗
+## 結果
 
-**cuda_roadmap** 提供分級 CUDA 實驗：從 naive 到優化版，並與 CPU / PyTorch 對照。
+**GPU：** NVIDIA GeForce RTX 3050 6GB Laptop（GA107、Ampere、sm_86）。執行 `python benchmarks/gpu_specs.py` 會印出你這張卡的 SM 數、時脈和理論峰值，roofline 和合理性檢查都使用這些值。
 
-### 分級內容
+### Roofline
 
-| Level | 核心 | 重點 |
-|-------|------|------|
-| **Level 1** | Vector add、reduction、naive matmul | thread/block/grid、coalescing |
-| **Level 2** | Tiled matmul、coalescing、bank conflict | Shared memory、tiling |
-| **Level 3** | Warp shuffle、fused ops、persistent kernel | Warp 級、fusion |
-| **Level 4** | FP16 Tensor Core matmul、WMMA | Tensor Cores、FP16 |
+![Roofline](profiling/roofline/roofline_plot.png)
 
-### GEMM 優化演進
+這張圖說明了三件事：
+- **GEMM 屬於 compute-bound，而且 cuBLAS 已經很接近 roof**（1024³～2048³ 時達 80～94%），這就是 WMMA kernel 要比較的標準。
+- **Softmax、LayerNorm、GELU 的算術強度只有約 1～2 FLOP/byte**，完全受頻寬限制，在這個大小（6MB 工作集）只用到 DRAM roof 的約 40%。這類運算的關鍵是 fusion，而不是更多 FLOPs，所以 MLP 把 bias + GELU 融進了 GEMM 的 epilogue。
+- **cuDNN 處理 C_in = 1 的卷積時只用到記憶體 roof 的 13～23%**，所以這種形狀正是專用 kernel 有機會勝出的地方。
 
-```mermaid
-flowchart LR
-    V1[Naive] --> V2[Tiled]
-    V2 --> V3[Shared Mem]
-    V3 --> V4[Reg Block]
-    V4 --> V5[WMMA / Vectorized]
-```
+### 已驗證的量測（FP16）
 
-### 代表效能 (RTX 3050)
+| Kernel | 形狀 | PyTorch | Triton（本專案） |
+|---|---|---|---|
+| Softmax | 2048 × 768 | 0.064 ms · 98 GB/s | 0.091 ms · 69 GB/s |
+| LayerNorm | 2048 × 768 | 0.063 ms · 100 GB/s | **0.062 ms · 101 GB/s** |
+| GELU | 157 萬個元素 | 0.071 ms · 88 GB/s | **0.055 ms · 115 GB/s** |
+| Matmul（cuBLAS） | 2048³ | 1.15 ms · 14.9 TFLOPS | 待重新量測 |
+| SDPA | B2 H8 S512 D64 | 0.105 ms · 10.2 TFLOPS | 待重新量測 |
 
-| 核心 | Naive / 對照 | 優化版 | 備註 |
-|------|--------------|--------|------|
-| Vector add (2²⁰) | 1 elem/thread coalesced | **float4** 向量化 | 更少 transaction |
-| Reduction (1M) | atomicAdd（慢） | **Shared memory** 樹狀 | **0.76 ms** |
-| Matrix mul (1024²) | 僅 global | **Tiled** shared memory | **521×** vs CPU |
-| FP16 matmul | FP32 CUDA cores | **WMMA** Tensor Core | Level 4 |
+> **待重新量測。** 修過的 kernel（Triton FlashAttention / matmul / conv / MLP、所有 CUDA extension kernel、WMMA GEMM）的舊數據已經移除，因為那些數字來自算錯結果、或之後改過的程式碼。用 `scripts/reproduce_all.sh`（或 `.bat`）可以重新產生所有經過驗證的結果。
 
-### 執行方式
+---
+
+## 快速開始
 
 ```bash
-cd cuda_roadmap && ./build.sh   # Windows: build.bat
-python cuda_roadmap/run_benchmarks.py
+git clone https://github.com/boson316/RTX3050-GPU-Mastery.git && cd RTX3050-GPU-Mastery
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt triton pytest nvidia-ml-py      # Windows：triton-windows
+
+pytest -q                              # kernel 正確性（GPU 上執行，或在 CPU 上用 TRITON_INTERPRET=1）
+tests/cuda_emulation/run_all.sh        # 在 CPU 上驗證 CUDA kernel 邏輯（需要 g++ >= 11）
+python benchmarks/gpu_specs.py         # 這張 GPU 的理論峰值
+scripts/reproduce_all.sh               # 一次跑完：驗證、benchmark、報告、roofline
 ```
 
-文件：[docs/cuda_roadmap.md](docs/cuda_roadmap.md)、[docs/level1_kernels.md](docs/level1_kernels.md)～[level4_tensor_core.md](docs/level4_tensor_core.md)。
+| 任務 | 指令 |
+|---|---|
+| CUDA roadmap | `cd cuda_roadmap && ./build.sh && cd .. && python cuda_roadmap/run_benchmarks.py` |
+| Triton kernels | `python -m triton_kernels.run_benchmarks` |
+| FlashAttention（CUDA vs Triton vs SDPA） | `python benchmarks/benchmark_attention.py` |
+| Transformer 區塊 | `python benchmarks/benchmark_transformer.py` |
+| Matmul / conv | `python benchmarks/benchmark_matmul.py`、`python benchmarks/benchmark_conv.py` |
+| 完整報告 | `python tools/performance_dashboard.py --skip-mnist` → [`benchmarks/performance_report.md`](benchmarks/performance_report.md) |
+| Roofline | `python profiling/roofline_analysis.py` |
+| Nsight | `python profiling/run_nsight_profiling.py`（[說明](docs/nsight_profiling_guide.md)） |
+
+Windows 上請在 *x64 Native Tools Command Prompt for VS* 裡編譯 CUDA extension。
 
 ---
 
-## 4. Triton 核心實驗
+## 學習資源
 
-**triton_kernels** 提供高階 Triton JIT 核心：matmul、conv、layernorm、softmax、Flash Attention。
+- [`tutorials/`](tutorials)：CUDA 基礎 → shared memory → tiling → Triton → FlashAttention → Transformer kernels
+- [`docs/`](docs/INDEX.md)：記憶體階層、優化指南、roofline、Nsight、各 Level 的 kernel 說明
+- [`notebooks/`](notebooks)：互動式範例
 
-| 模組 | 說明 | 變體 |
-|------|------|------|
-| **matmul** | C = A @ B | Baseline、optimized、autotuned |
-| **conv** | 3×3 Conv2D FP16 | Tile reuse、autotune |
-| **layernorm** | Fused normalize + affine | Baseline、optimized、autotune |
-| **softmax** | 最後一維 softmax | Max / sum / normalize |
-| **flash_attention** | Fused softmax(QKᵀ/√d)V | Online softmax、causal |
-
-### Triton vs CUDA 對照
-
-| 面向 | CUDA | Triton |
-|------|------|--------|
-| 編程模型 | thread/block/grid、顯式索引 | Block 級、高階抽象 |
-| 記憶體 | 手動 shared/global | `tl.load` / `tl.store`、block 描述 |
-| 自動化 | 多需手動調校 | 部分自動並行與排程 |
-| 可攜性 | 常需依架構微調 | 同一程式多架構 |
-
-### 執行方式
-
-```bash
-python -m triton_kernels.run_benchmarks
-```
-
-安裝：`pip install triton`（Linux）或 `pip install triton-windows`（Windows）。  
-詳見：[triton_kernels/README.md](triton_kernels/README.md)。
-
----
-
-## 5. FlashAttention 實作
-
-**flash_attention_simple** 實作記憶體高效注意力：不 materialize 完整 S×S 矩陣，以 **分塊 (tiling)** 與 **online softmax** 在 shared memory 內計算。
-
-### 演算法概念
-
-```mermaid
-flowchart TB
-    subgraph Input
-        Q[Q]
-        K[K]
-        V[V]
-    end
-    subgraph Block["Per Block"]
-        B1[Load Q_block, K_block, V_block]
-        B2[Compute S = Q_block @ K_block^T]
-        B3[Online softmax + P @ V_block]
-        B4[Accumulate O_block]
-    end
-    Q --> B1
-    K --> B1
-    V --> B1
-    B1 --> B2 --> B3 --> B4
-```
-
-- **分塊**：Q、K、V 依 block 載入 shared memory，只算當前 block 對應的 S_ij。
-- **Online softmax**：不需存整個 S，用 running max/sum 做數值穩定 softmax 並累加輸出。
-- **結果**：O(N) 額外記憶體、較少 HBM 存取，適合長序列。
-
-### 實作對照
-
-| 實作 | 檔案 / 模組 | 記憶體 | 備註 |
-|------|-------------|--------|------|
-| **PyTorch 對照** | reference (correctness) | O(S²) | 僅正確性 |
-| **CUDA** | `flash_attention_cuda.cu` | Tiled, shared mem | D ≤ 64 |
-| **Triton** | `triton_kernels/flash_attention` | Tiled，無完整矩陣 | — |
-
-### 建置與基準測試
-
-```bash
-cd flash_attention_simple && build.bat   # CUDA 獨立版（可選）
-python flash_attention_simple/benchmark_flash_attention.py
-```
-
-比較 PyTorch、CUDA、Triton：B=2, H=8, D=64, S ∈ {128, 256, 512, 1024}。  
-詳見：[flash_attention_simple/README.md](flash_attention_simple/README.md)。
-
----
-
-## 6. Transformer GPU 核心
-
-**gpu_kernels/transformer** 提供 FP16 Transformer 建構塊：PyTorch 對照、Triton、以及可選 CUDA。
-
-### 融合區塊概念
-
-```mermaid
-flowchart LR
-    subgraph Fused["Fused Transformer Block"]
-        A[QKV Linear]
-        B[FlashAttention]
-        C[Out Linear]
-        D[FFN: Gate + Up + Down]
-        E[LayerNorm x2]
-    end
-    X[Input] --> A --> B --> C --> D --> E --> Y[Output]
-```
-
-| 核心 | 公式 / 功能 | 備註 |
-|------|-------------|------|
-| **Fused QKV** | y = x @ W_qkv + b | cuBLAS matmul + bias kernel |
-| **Softmax** | 最後維度、row-wise | 3-pass: max, sum, normalize |
-| **LayerNorm** | (x − μ) * rstd * γ + β | 在最後維度融合 |
-| **GELU** | 0.5·x·(1 + tanh(…)) | FP16、float32 累加 |
-| **Fused MLP** | linear2(GELU(linear1(x))) | 兩次 matmul + GELU |
-
-### 執行方式
-
-```bash
-python benchmarks/benchmark_transformer.py
-```
-
-可設 `TRANSFORMER_BENCHMARK_FULL=1`（較大 B/S）、`TRANSFORMER_BENCHMARK_CUDA=1`（啟用自訂 CUDA）。  
-詳見：[gpu_kernels/transformer/README.md](gpu_kernels/transformer/README.md)、[docs/transformer_benchmark_gpu_load.md](docs/transformer_benchmark_gpu_load.md)。
-
----
-
-## 7. 效能基準測試
-
-以下為 **RTX 3050 Laptop 6GB** 上之代表結果；實際數值依環境而異。
-
-### 效能總覽 (Performance at a glance)
-
-| Benchmark | Implementation | Latency (ms) | Throughput | Note |
-|-----------|----------------|--------------|------------|------|
-| **Matmul 1024³** | PyTorch (cuBLAS) | ~0.17 | ~12.8 TFLOPS | FP16 |
-| **Matmul 1024³** | Triton | ~0.15 | ~14.3 TFLOPS | FP16 |
-| **Conv 3×3 (B=128, 64×64)** | Triton | ~0.80 | ~705 GFLOPS | FP16 |
-| **Attention (B=2, S=512, D=64)** | PyTorch SDPA | ~0.10 | ~10.2 TFLOPS | FP16 |
-| **Transformer QKV (B=8, S=256)** | PyTorch | ~0.89 | ~8.1 TFLOPS | FP16 |
-| **Reduction 1M** | CUDA shared mem | **0.76** | — | Level 1 |
-| **Matrix mul 1024²** | CUDA tiled | — | **521×** vs CPU | Level 2 |
-
-*Run `python tools/performance_dashboard.py` to generate full tables and charts on your machine.*
-
-### Benchmark 圖表 (Benchmark charts)
-
-圖表於執行基準腳本或 `tools/performance_dashboard.py` 後產出於 `benchmarks/plots/` 與 `benchmarks/`。範例：
-
-| Chart | Path | Description |
-|-------|------|-------------|
-| Matmul latency by size | `benchmarks/plots/matmul_latency_by_size.png` | PyTorch vs Triton across 512³–2048³ |
-| Conv comparison | `benchmarks/plots/conv_latency_by_config.png` | Conv2D across configs |
-| Transformer kernels | `benchmarks/plots/transformer_latency_by_kernel.png` | QKV, Softmax, LayerNorm, GELU, MLP |
-| Matrix mul speedup | `benchmarks/matrix_mul_speedup.png` | CPU vs GPU (e.g. 521×) |
-| Roofline | `profiling/nsight_reports/roofline_model.png` | Memory- vs compute-bound |
-
-*Images below appear after you run benchmarks (e.g. `python tools/performance_dashboard.py`).*
-
-![Matmul latency by size](benchmarks/plots/matmul_latency_by_size.png)
-*Matmul: PyTorch vs Triton (512³–2048³)*
-
-![Conv latency by config](benchmarks/plots/conv_latency_by_config.png)
-*Conv2D: latency by config*
-
-![Transformer latency by kernel](benchmarks/plots/transformer_latency_by_kernel.png)
-*Transformer kernels: QKV, Softmax, LayerNorm, GELU, MLP*
-
-### 基準腳本與圖表
-
-| 腳本 | 輸出 / 圖 |
-|------|-----------|
-| `benchmarks/benchmark_matmul.py` | PyTorch vs Triton matmul；GFLOPS |
-| `benchmarks/benchmark_conv.py` | torch vs Extension vs Triton → 如 `conv_benchmark.png` |
-| `benchmarks/benchmark_attention.py` | SDPA vs Triton Flash |
-| `benchmarks/benchmark_transformer.py` | QKV / Softmax / LayerNorm / GELU / MLP 延遲與頻寬 |
-| `benchmarks/generate_charts.py` | 彙總產生多張圖表 |
-
-### 圖表對照
-
-| 圖表 | 腳本 / 路徑 | 說明 |
-|------|-------------|------|
-| **Matrix mul 521×** | `benchmarks/benchmark_matmul.py` → `matrix_mul_speedup.png` | CPU vs GPU 時間、加速比 (N=1024) |
-| **MNIST 99%** | `extension/mnist_custom_conv.py` → `mnist_acc_loss.png` | 訓練/測試 loss 與準確率 |
-| **Conv 比較** | `benchmarks/benchmark_conv.py` → `conv_benchmark.png` | torch vs Extension vs Triton |
-| **Roofline** | `profiling/roofline_analysis/plot_roofline.py` → `roofline_model.png` | Memory-bound vs compute-bound |
-
-```bash
-python benchmarks/benchmark_matmul.py
-python benchmarks/benchmark_conv.py
-python benchmarks/benchmark_attention.py
-python benchmarks/generate_charts.py   # 可加 --skip-mnist
-```
-
----
-
-## 8. Nsight 效能剖析
-
-使用 **NVIDIA Nsight Compute** 與 **Nsight Systems** 取得 kernel 級與系統級數據。
-
-### Nsight Compute — Kernel 指標範例
-
-| 指標 | 意義 |
-|------|------|
-| **Occupancy** | 每 SM 的 thread 數 vs 理論上限 |
-| **Memory bandwidth** | DRAM / L2 利用率 |
-| **Warp divergence** | Warp 執行效率（低 ⇒ 發散多） |
-| **Timeline** | Kernel 啟動順序與時長（Nsight Systems） |
-
-### 產出檔案
-
-| 檔案 | 工具 | 說明 |
-|------|------|------|
-| `transformer_timeline.nsys-rep` | Nsight Systems | Kernel 時間軸 |
-| `transformer_kernels.ncu-rep` | Nsight Compute | 每 kernel 指標 |
-| `transformer_kernels_metrics.json` | 解析腳本 | 供 Roofline 使用 |
-| **roofline_model.png** | `plot_roofline.py` | Roofline：memory-bound vs compute-bound |
-
-### Kernel 時間軸示意
-
-```mermaid
-gantt
-    title Kernel 時間軸 (示意)
-    dateFormat X
-    axisFormat %L
-    section GPU
-    CUDA GEMM    :a1, 0, 120
-    Softmax      :a2, 120, 145
-    LayerNorm    :a3, 145, 162
-    section CPU
-    Launch / Sync :b1, 0, 5
-    Launch       :b2, 118, 122
-```
-
-### 指令
-
-```bash
-# 剖析（SKIP_NSYS=1 跳過時間軸；NCU_QUICK=1 約 1 分鐘）
-set SKIP_NSYS=1
-set NCU_QUICK=1
-python profiling/run_nsight_profiling.py
-
-# Roofline 圖
-python profiling/roofline_analysis/plot_roofline.py
-```
-
-輸出：`profiling/nsight_reports/roofline_model.png`。  
-詳見：[profiling/nsight_reports/README.md](profiling/nsight_reports/README.md)、[docs/nsight_profiling_guide.md](docs/nsight_profiling_guide.md)。
-
----
-
-## 9. Roofline 分析
-
-以 **算術強度 (Arithmetic Intensity, AI)** 與 **峰值頻寬/算力** 繪製 Roofline，判斷 kernel 屬 **compute-bound** 或 **memory-bound**。
-
-### Roofline 概念
-
-- **算術強度** = FLOPs ÷ (bytes read + written)。
-- **Ridge point** = peak_FLOPS ÷ peak_BW；**AI < Ridge** ⇒ memory-bound，**AI > Ridge** ⇒ compute-bound。
-
-```mermaid
-flowchart LR
-  subgraph Roofline
-    M["Memory-bound 區\n(slope = BW)"]
-    R["Ridge point\n(AI = peak_FLOPS/BW)"]
-    C["Compute-bound 區\n(flat = peak FLOPS)"]
-    M --> R --> C
-  end
-```
-
-- **Ridge 以下** → memory-bound（如 Softmax、LayerNorm、GELU）。
-- **Ridge 以上** → compute-bound（如 QKV、MLP）。
-
-### RTX 3050 示意（Ridge ≈ 4.5e9 / 192e9 ≈ 23 FLOP/Byte）
+## 專案結構
 
 ```
-GFLOPS
-  ^
-  |                    *-------- Peak Compute (~4.5 FP32)
-  |                   /
-  |                  /
-  |                 *  GEMM / QKV
-  |                /
-  |               /
-  |              *----------- Ridge (AI ≈ 23)
-  |             /
-  |            *  FlashAttn
-  |           /
-  |          *  Softmax / LayerNorm
-  |         /
-  +--------*---------------------------------> Arithmetic Intensity (log)
+cuda_roadmap/            Level 1-4 CUDA benchmark + common/bench_common.cuh（計時 + 驗證）
+triton_kernels/          Triton kernels（matmul、linear/qkv/mlp、softmax、layernorm、gelu、conv、flash_attention）
+flash_attention_simple/  CUDA FlashAttention：flash_attention_kernel.cuh、PyTorch extension、standalone
+gpu_kernels/             transformer CUDA extension + 小型 standalone kernel
+extension/               conv3x3 PyTorch extension（conv3x3_kernel.cuh）
+benchmarks/              有驗證的 benchmark 框架（bench_utils.py）、gpu_specs.py、結果 CSV
+profiling/               roofline 分析、Nsight 腳本與報告
+tests/                   Triton interpreter 測試、cuda_emulation/（CUDA kernel 的 CPU 模擬器）
+docs/ tutorials/ notebooks/
 ```
 
-### 指令
-
-```bash
-python profiling/roofline_analysis/plot_roofline.py
-```
-
-詳見：[docs/optimization_guide.md](docs/optimization_guide.md)、Roofline 相關腳本與 `profiling/roofline/`。
-
----
-
-## 🗂️ 專案結構
-
-```
-RTX3050-GPU-Mastery/
-├── docs/                   # 文件（INDEX、getting_started、memory hierarchy、roadmap）
-├── tutorials/              # 逐步教學：CUDA 基礎、shared memory、tiling、Triton、FlashAttention、Transformer
-├── notebooks/              # 教學 Notebook（01–04、RTX 3050 範例）
-├── scripts/                # 一鍵重現：reproduce_all.bat / .sh
-├── benchmarks/             # matmul、conv、attention、transformer + generate_charts.py
-├── profiling/              # Nsight 報告 + roofline_analysis
-├── cuda_roadmap/           # CUDA 分級實驗（Level 1–4）
-├── gpu_kernels/            # 純 CUDA：vector_add、reduction、matrix_mul、conv2d、transformer
-├── triton_kernels/         # Triton：matmul、conv、layernorm、softmax、flash_attention
-├── flash_attention_simple/ # FlashAttention：PyTorch、CUDA、Triton
-├── extension/              # PyTorch CUDA Extension（conv）
-├── requirements.txt
-```
-
----
-
-## 🚀 安裝與一鍵重現 (Easy to reproduce)
-
-### Reproduce in 3 steps
-
-```bash
-# 1. Clone and install (from repo root)
-git clone https://github.com/boson316/RTX3050-GPU-Mastery.git
-cd RTX3050-GPU-Mastery
-pip install -r requirements.txt
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-pip install triton matplotlib ninja
-# Windows: pip install triton-windows
-
-# 2. Run all benchmarks and generate report (one command)
-python tools/performance_dashboard.py --skip-mnist
-
-# 3. (Optional) CUDA roadmap + extension
-cd cuda_roadmap && ./build.sh   # or build.bat on Windows
-cd extension && pip install --no-build-isolation .
-```
-
-*Full setup:* [docs/getting_started.md](docs/getting_started.md)
-
-### Example commands: running kernels
-
-All commands below are run from **repository root**. Copy-paste to try each component.
-
-| What | Command |
-|------|---------|
-| **CUDA Level 1–4** | `cd cuda_roadmap && ./build.sh && python run_benchmarks.py` |
-| **Triton (matmul, conv, softmax, etc.)** | `python -m triton_kernels.run_benchmarks` |
-| **FlashAttention** | `python flash_attention_simple/benchmark_flash_attention.py` |
-| **Transformer kernels** | `python benchmarks/benchmark_transformer.py` |
-| **Matmul only** | `python benchmarks/benchmark_matmul.py` |
-| **Conv only** | `python benchmarks/benchmark_conv.py` |
-| **Attention only** | `python benchmarks/benchmark_attention.py` |
-| **Full dashboard (all benchmarks + report)** | `python tools/performance_dashboard.py` |
-| **One-click reproduce (benchmarks + charts)** | `scripts/reproduce_all.bat` (Windows) or `./scripts/reproduce_all.sh` (Linux/macOS) |
-| **Roofline plot** | `python profiling/roofline_analysis/plot_roofline.py` |
-
-### Install (detailed)
-
-```bash
-pip install -r requirements.txt
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-pip install triton matplotlib ninja
-# Windows Triton: pip install triton-windows
-
-# CUDA roadmap (optional)
-cd cuda_roadmap && ./build.sh   # Windows: build.bat
-
-# PyTorch CUDA Extension / conv (optional)
-cd extension && pip install --no-build-isolation .
-```
-
-**效能儀表板：** `python tools/performance_dashboard.py` → 產生 [benchmarks/performance_report.md](benchmarks/performance_report.md)。  
-**Windows 建 Extension：** 請使用 **x64 Native Tools Command Prompt for VS**。
-
----
-
-## ⭐ 引用與 Star
-
-若本實驗室對你有幫助，歡迎 **Star** ⭐。
-
-```text
-RTX 3050 GPU Optimization Lab — CUDA roadmap, Triton kernels, Transformer, FlashAttention, Nsight profiling.
-https://github.com/boson316/RTX3050-GPU-Mastery
-```
-
-## License
+## 授權
 
 [MIT](LICENSE)
-
----
-
-<p align="center">
-  <strong>⚡ 從 CUDA 到 FlashAttention，在 RTX 3050 上系統化掌握 GPU 核心優化 ⚡</strong>
-</p>

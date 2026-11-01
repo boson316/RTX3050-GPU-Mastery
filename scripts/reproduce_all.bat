@@ -1,22 +1,15 @@
 @echo off
-REM Reproduce benchmarks and charts. Run from repo root.
+REM Verify, benchmark and plot everything. Run from repo root in an "x64 Native Tools Command Prompt for VS".
 cd /d "%~dp0\.."
-echo === RTX 3050 GPU Lab - Reproduce all ===
-echo.
-echo 1. Matmul benchmark
-python benchmarks/benchmark_matmul.py
-echo.
-echo 2. Conv benchmark
-python benchmarks/benchmark_conv.py
-echo.
-echo 3. Transformer benchmark (light)
-python benchmarks/benchmark_transformer.py
-echo.
-echo 4. Generate charts (skip MNIST by default)
-python benchmarks/generate_charts.py --skip-mnist
-echo.
-echo 5. Roofline plot
-python profiling/roofline_analysis/plot_roofline.py
-echo.
-echo Done. Charts in benchmarks/ and profiling/nsight_reports/
-pause
+echo === 1. Correctness: Triton kernels ===
+python -m pytest -q || exit /b 1
+echo === 2. Device peaks ===
+python benchmarks\gpu_specs.py
+echo === 3. CUDA roadmap (self-verifying binaries) ===
+pushd cuda_roadmap && call build.bat && popd
+python cuda_roadmap\run_benchmarks.py || exit /b 1
+echo === 4. Verified benchmarks + report + charts ===
+python tools\performance_dashboard.py --skip-mnist
+echo === 5. Roofline ===
+python profiling\roofline_analysis.py
+echo Done. (CPU emulator tests need g++ / WSL: tests\cuda_emulation\run_all.sh)

@@ -34,7 +34,7 @@ You profile **whatever the application launches**. In this repo:
 
 - **Default benchmark:** `python benchmarks/benchmark_transformer.py` (light: B=8, S=256, H=768).
 - **Quick probe:** `profiling/_ncu_quick_probe.py` (one matmul) for a short ncu run (~1 min).
-- **Full transformer:** Optional env `TRANSFORMER_BENCHMARK_FULL=1` and `TRANSFORMER_BENCHMARK_CUDA=1`.
+- **Full transformer:** Optional env `TRANSFORMER_BENCHMARK_FULL=1` (larger shapes); `TRANSFORMER_BENCHMARK_CUDA=0` skips the CUDA extension.
 
 Launch configuration is unchanged; Nsight **wraps** the run and replays kernels (ncu) or traces API calls (nsys).
 

@@ -117,7 +117,7 @@ See [roofline_analysis.md](roofline_analysis.md) and [memory_hierarchy_diagrams.
 
 | Kernel | Configuration | Effect of hierarchy |
 |--------|----------------|---------------------|
-| Matmul naive vs tiled (N=1024) | 16×16 tile, shared | **~521×** vs CPU; tiled much faster than naive (less global traffic) |
+| Matmul naive vs tiled (N=1024) | 16×16 tile, shared | ~521× vs a naive single-threaded CPU loop; tiled much faster than naive (less global traffic) |
 | Conv torch vs extension | 16×16 tile, shared tile_in/tile_w | **~1.5×** over torch (better reuse) |
 | Transformer QKV | cuBLAS matmul + bias kernel | Matmul uses library-optimized access; bias is trivial coalesced write |
 

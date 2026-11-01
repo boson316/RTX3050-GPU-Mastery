@@ -6,13 +6,17 @@ GPU kernels used in transformer architectures, targeting RTX 3050 (sm_86).
 
 | Kernel | Description |
 |--------|-------------|
-| **Fused QKV** | `y = x @ W_qkv + b` — single matmul for Q,K,V projection |
-| **Softmax** | Row-wise softmax over last dimension (3-pass: max, sum, normalize) |
-| **LayerNorm** | `(x - mean) * rstd * weight + bias` over last dimension |
-| **GELU** | `0.5 * x * (1 + tanh(sqrt(2/π)(x + 0.044715 x³)))` |
-| **Fused MLP** | `out = linear2(GELU(linear1(x)))` — two matmuls + GELU |
+| **Fused QKV** | `y = x @ W_qkv + b`: one row-major cuBLAS GEMM (`Yᵀ = WᵀXᵀ`, no transpose kernel) + bias epilogue |
+| **Softmax** | Row-wise **online** softmax: running (max, sum) in one pass, normalise in a second (2 reads instead of 3) |
+| **LayerNorm** | Welford mean/variance with a parallel (Chan) merge across warps: 2 reads, numerically stable |
+| **GELU** | tanh form `0.5·x·(1 + tanh(√(2/π)(x + 0.044715x³)))`, grid-stride loop |
+| **Fused MLP** | GEMM → fused bias+GELU epilogue → GEMM → bias |
 
-All kernels use FP16 (`__half` / `torch.float16`) with float32 accumulation where needed.
+FP16 storage, FP32 math. Block reductions always run the second stage on a full warp; the earlier
+version used `__shfl_xor_sync(0xffffffff)` with 8 active lanes, which could hang (see
+[docs/ENGINEERING_LOG.md](../../docs/ENGINEERING_LOG.md#4-block-reduction-could-hang-the-gpu)).
+Device code lives in `transformer_kernels.cuh` and is tested on the CPU by
+`tests/cuda_emulation/test_transformer_emu.cpp`.
 
 ## Build
 

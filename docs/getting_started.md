@@ -108,7 +108,7 @@ Example: torch.nn.Conv2d vs custom_conv2d vs Triton 3×3 conv (B=128, 1→32 cha
 python benchmarks/benchmark_transformer.py
 ```
 
-Reports latency (ms), memory bandwidth (GB/s), and GFLOPS per kernel. Use `TRANSFORMER_BENCHMARK_CUDA=1` to include custom CUDA kernels (requires built extension).
+Reports latency (ms), memory bandwidth (GB/s), and GFLOPS per kernel. Custom CUDA kernels are included by default (JIT-built on first use); set `TRANSFORMER_BENCHMARK_CUDA=0` to skip them.
 
 ### Roofline plot (no Nsight required)
 

@@ -1,6 +1,6 @@
 # PyTorch CUDA Extension — Custom 3×3 Conv2d
 
-FP16 kernel, 16×16 tile, `tile_in[18][18]`, `tile_w[32][9]`, sm_86. **~1.5x** vs `torch.nn.Conv2d` on RTX 3050.
+16×16 output tile × 32 channels per block, 18×18 halo tile in shared memory, FP32 or FP16 storage with FP32 accumulation (`conv3x3_kernel.cuh`). The earlier "~1.5x vs cuDNN" figure compared an FP16-accumulating kernel against FP32 cuDNN and has been withdrawn, see [docs/ENGINEERING_LOG.md](../docs/ENGINEERING_LOG.md#10-the-custom-conv-15x-faster-than-cudnn-compared-fp16-math-with-fp32).
 
 ## Build
 

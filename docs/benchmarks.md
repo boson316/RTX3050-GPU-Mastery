@@ -1,5 +1,7 @@
 # Benchmarks — RTX 3050 6GB Laptop GPU
 
+> **Historical numbers.** This page records the first measurements of the project. Several of them came from kernels that were later found to be incorrect or from unequal comparisons (FP16-accumulating conv vs FP32 cuDNN, naive CPU baseline). See [ENGINEERING_LOG.md](ENGINEERING_LOG.md); current, verified results are produced by `scripts/reproduce_all.sh` into [benchmarks/performance_report.md](../benchmarks/performance_report.md).
+
 All timings on **NVIDIA GeForce RTX 3050 6GB Laptop GPU** (Ampere sm_86). PyTorch CUDA 12.4, Windows.
 
 ---

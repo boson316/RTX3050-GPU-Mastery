@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
-# Reproduce benchmarks and charts. Run from repo root.
-set -e
+# Verify, benchmark and plot everything. Run from repo root on a CUDA machine.
+set -euo pipefail
 cd "$(dirname "$0")/.."
-echo "=== RTX 3050 GPU Lab - Reproduce all ==="
-echo ""
-echo "1. Matmul benchmark"
-python benchmarks/benchmark_matmul.py
-echo ""
-echo "2. Conv benchmark"
-python benchmarks/benchmark_conv.py
-echo ""
-echo "3. Transformer benchmark (light)"
-python benchmarks/benchmark_transformer.py
-echo ""
-echo "4. Generate charts (skip MNIST by default)"
-python benchmarks/generate_charts.py --skip-mnist
-echo ""
-echo "5. Roofline plot"
-python profiling/roofline_analysis/plot_roofline.py
-echo ""
-echo "Done. Charts in benchmarks/ and profiling/nsight_reports/"
+echo "=== 1. Correctness: Triton kernels (compiled on GPU) ==="
+python -m pytest -q
+echo "=== 2. Correctness: CUDA kernel logic on the CPU emulator ==="
+tests/cuda_emulation/run_all.sh
+echo "=== 3. Device peaks ==="
+python benchmarks/gpu_specs.py
+echo "=== 4. CUDA roadmap (self-verifying binaries) ==="
+(cd cuda_roadmap && ./build.sh) && python cuda_roadmap/run_benchmarks.py
+echo "=== 5. Verified benchmarks + report + charts ==="
+python tools/performance_dashboard.py --skip-mnist
+echo "=== 6. Roofline ==="
+python profiling/roofline_analysis.py
+echo "Done: benchmarks/performance_report.md, benchmarks/plots/, profiling/roofline/, cuda_roadmap/results.md"

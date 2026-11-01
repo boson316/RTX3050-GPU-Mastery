@@ -113,7 +113,7 @@ Example (format only; actual numbers from your run):
 | GELU | — | — | — |
 | MLP (fused) | — | — | — |
 
-Use env: `TRANSFORMER_BENCHMARK_FULL=1` for larger B,S; `TRANSFORMER_BENCHMARK_CUDA=1` to enable custom CUDA kernels.
+Use env: `TRANSFORMER_BENCHMARK_FULL=1` for larger B,S; `TRANSFORMER_BENCHMARK_CUDA=0` to skip the custom CUDA kernels (on by default).
 
 ---
 

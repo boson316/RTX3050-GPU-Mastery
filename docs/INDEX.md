@@ -12,6 +12,7 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
+| **[Engineering Log](ENGINEERING_LOG.md)** | Bugs found by the verification pipeline: root cause, fix, regression test |
 | **[GPU Memory Hierarchy](gpu_memory_hierarchy.md)** | Levels, coalescing, tiling, roofline; RTX 3050; code snippets |
 | **[CUDA Kernel Optimization](cuda_kernel_optimization.md)** | Tiled matmul, conv, transformer CUDA kernels; launch config; benchmarks |
 | **[Triton Kernel Design](triton_kernel_design.md)** | Matmul, conv, layernorm, softmax, Flash Attention; grid/block; code |
@@ -26,6 +27,7 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
+| **[Engineering Log](ENGINEERING_LOG.md)** | Bugs found by the verification pipeline: root cause, fix, regression test |
 | **[Getting Started](getting_started.md)** | Environment setup, first GPU run, RTX 3050 checklist |
 | **[GPU Memory Hierarchy](gpu_memory_hierarchy.md)** | Registers → shared → L2 → global; why it matters |
 | **[Memory Hierarchy Diagrams](memory_hierarchy_diagrams.md)** | Visual diagrams (Mermaid + [generated PNGs](images/README.md)) for memory, thread hierarchy, FlashAttention tiling |
@@ -36,6 +38,7 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
+| **[Engineering Log](ENGINEERING_LOG.md)** | Bugs found by the verification pipeline: root cause, fix, regression test |
 | **[CUDA Roadmap](cuda_roadmap.md)** | Level 1–4: vector add, reduction, matmul, tiling, Tensor Cores |
 | **[Level 1: Basic Kernels](level1_kernels.md)** | Vector add, reduction, naive matmul |
 | **[Level 2: Memory](level2_memory.md)** | Tiled matmul, coalescing, bank conflict |
@@ -49,6 +52,7 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
+| **[Engineering Log](ENGINEERING_LOG.md)** | Bugs found by the verification pipeline: root cause, fix, regression test |
 | **[Optimization Guide](optimization_guide.md)** | Memory-bound vs compute-bound, Nsight, roofline |
 | **[Benchmarks](benchmarks.md)** | Conv, matmul, MNIST, transformer — numbers and tables |
 | **[Transformer Benchmark (GPU load)](transformer_benchmark_gpu_load.md)** | Why GPU hits 100%, mitigations |
@@ -66,3 +70,4 @@ In-depth technical docs for GPU engineers and advanced students. Each includes a
 
 | Doc | Description |
 |-----|-------------|
+| **[Engineering Log](ENGINEERING_LOG.md)** | Bugs found by the verification pipeline: root cause, fix, regression test |
