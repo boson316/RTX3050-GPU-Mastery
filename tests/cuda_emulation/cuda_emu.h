@@ -62,10 +62,8 @@ inline float __half2float(__half h) { return h; }
 inline __half __float2half(float f) { return f; }
 inline float __expf(float x) { return std::exp(x); }
 inline float rsqrtf(float x) { return 1.f / std::sqrt(x); }
-inline float tanhf(float x) { return std::tanh(x); }
-inline float exp2f(float x) { return std::exp2(x); }
-using std::fmaf;
-using std::fmaxf;
+// exp2f, tanhf, fmaf, fmaxf come from <math.h> (defining them here breaks MSVC, where the
+// UCRT already provides inline definitions).
 using std::min;
 
 // Launch `kernel(args...)` over grid x block, one block at a time.
