@@ -28,9 +28,8 @@ Register usage:
 from __future__ import annotations
 
 import torch
-import triton.language as tl
-
 import triton
+import triton.language as tl
 
 # -----------------------------------------------------------------------------
 # Baseline: straightforward 3x3 conv, load input per (kh,kw) and per oc

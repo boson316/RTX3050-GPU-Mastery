@@ -15,9 +15,8 @@ K % BLOCK_K != 0 the last iteration read past the end of each row of x and W.
 from __future__ import annotations
 
 import torch
-import triton.language as tl
-
 import triton
+import triton.language as tl
 
 
 @triton.jit

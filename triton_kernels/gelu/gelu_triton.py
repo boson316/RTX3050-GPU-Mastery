@@ -6,9 +6,8 @@ Elementwise, memory-bound: one coalesced read + one write per element, FP32 math
 from __future__ import annotations
 
 import torch
-import triton.language as tl
-
 import triton
+import triton.language as tl
 
 
 @triton.jit

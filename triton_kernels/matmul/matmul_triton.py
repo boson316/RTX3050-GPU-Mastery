@@ -33,9 +33,8 @@ Register usage:
 from __future__ import annotations
 
 import torch
-import triton.language as tl
-
 import triton
+import triton.language as tl
 
 
 @triton.jit
