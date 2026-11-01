@@ -18,14 +18,13 @@ import torch
 from benchmarks.bench_utils import (
     BENCHMARKS_DIR,
     PLOTS_DIR,
-    run_bench,
-    sample_gpu_utilization,
-    compute_metrics,
-    save_csv,
-    print_benchmark_table,
+    ensure_plots_dir,
+    measure,
     plot_bar_chart,
     plot_grouped_bars,
-    ensure_plots_dir,
+    print_benchmark_table,
+    sample_gpu_utilization,
+    save_csv,
 )
 
 WARMUP = 8
@@ -44,76 +43,53 @@ def _bytes(*tensors: torch.Tensor) -> int:
 
 
 def attention_flops(B: int, H: int, S: int, D: int) -> float:
-    # Q@K^T: B*H*S*D * (S*D) * 2; softmax+@V: B*H*S*S*D * 2
+    # Q@K^T: 2*S*S*D per head; P@V: 2*S*S*D per head (softmax FLOPs ignored, as is conventional)
     qk = 2 * B * H * S * D * S
     attn_v = 2 * B * H * S * S * D
     return qk + attn_v
 
 
-def run_pytorch(B: int, H: int, S: int, D: int) -> tuple[float, float, float]:
-    q = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    k = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    v = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(q, k, v)
-    bytes_w = B * H * S * D * 2
-
-    def fn():
-        torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=False)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    flops = attention_flops(B, H, S, D)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops", 0.0), m["memory_bandwidth_gbs"]
+def _inputs(B: int, H: int, S: int, D: int, dtype: torch.dtype):
+    g = torch.Generator(device="cuda").manual_seed(B * 1000 + S)
+    return [torch.randn(B, H, S, D, device="cuda", dtype=dtype, generator=g) for _ in range(3)]
 
 
-def run_triton(B: int, H: int, S: int, D: int) -> tuple[float | None, float | None, float | None]:
+def _reference(q, k, v) -> torch.Tensor:
+    return torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float())
+
+
+def _measure(name, fn, q, k, v, elem_bytes, B, H, S, D):
+    m = measure(name, fn, _reference(q, k, v), 3 * B * H * S * D * elem_bytes, B * H * S * D * elem_bytes,
+                attention_flops(B, H, S, D), warmup=WARMUP, repeat=REPEAT)
+    if m is None:
+        return None, None, None
+    return m["latency_ms"], m.get("gflops"), m["memory_bandwidth_gbs"]
+
+
+def run_pytorch(B: int, H: int, S: int, D: int):
+    q, k, v = _inputs(B, H, S, D, DTYPE)
+    return _measure("SDPA", lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v), q, k, v, 2, B, H, S, D)
+
+
+def run_triton(B: int, H: int, S: int, D: int):
     try:
         from triton_kernels.flash_attention import flash_attention_triton
     except Exception:
         return None, None, None
-    q = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    k = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    v = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(q, k, v)
-    bytes_w = B * H * S * D * 2
-
-    def fn():
-        flash_attention_triton(q, k, v, causal=False)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    flops = attention_flops(B, H, S, D)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops"), m["memory_bandwidth_gbs"]
+    q, k, v = _inputs(B, H, S, D, DTYPE)
+    return _measure("Triton flash", lambda: flash_attention_triton(q, k, v, causal=False), q, k, v, 2, B, H, S, D)
 
 
-def run_cuda(B: int, H: int, S: int, D: int) -> tuple[float | None, float | None, float | None]:
-    """flash_attention_simple expects float32 and D<=64. Skip if extension not loaded (avoid bogus metrics)."""
+def run_cuda(B: int, H: int, S: int, D: int):
+    """flash_attention_simple CUDA kernel: FP32, D <= 64. FLOPs are the same, bytes are 2x (FP32)."""
     if D > 64:
         return None, None, None
     try:
         from flash_attention_simple.attention_cuda import attention_cuda
     except Exception:
         return None, None, None
-    q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float32)
-    k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float32)
-    v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float32)
-    # If extension failed to load, attention_cuda returns None — do not report fake metrics
-    if attention_cuda(q, k, v) is None:
-        return None, None, None
-    bytes_r = _bytes(q, k, v)
-    bytes_w = B * H * S * D * 4
-
-    def fn():
-        out = attention_cuda(q, k, v)
-        if out is not None:
-            out.sum().item()
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    if lat <= 0:
-        return None, None, None
-    flops = attention_flops(B, H, S, D)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops"), m["memory_bandwidth_gbs"]
+    q, k, v = _inputs(B, H, S, D, torch.float32)
+    return _measure("CUDA flash (FP32)", lambda: attention_cuda(q, k, v), q, k, v, 4, B, H, S, D)
 
 
 def main():
@@ -180,7 +156,7 @@ def main():
 
     fieldnames = ["implementation", "config", "latency_ms", "gflops", "memory_bandwidth_gbs", "gpu_utilization_pct"]
     save_csv(rows, BENCHMARKS_DIR / "benchmark_attention_results.csv", fieldnames=fieldnames)
-    print(f"CSV saved: benchmarks/benchmark_attention_results.csv")
+    print("CSV saved: benchmarks/benchmark_attention_results.csv")
 
     print_benchmark_table(rows, title="Attention benchmark", columns=fieldnames)
 

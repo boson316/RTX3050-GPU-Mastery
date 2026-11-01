@@ -5,13 +5,12 @@ All charts are saved under benchmarks/plots/.
 from __future__ import annotations
 
 import csv
-import os
-import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import torch
 
@@ -38,23 +37,119 @@ def _bytes_tensors(*tensors: torch.Tensor) -> int:
     return sum(t.numel() * t.element_size() for t in tensors)
 
 
+class BenchmarkError(RuntimeError):
+    """Raised when a kernel's output is wrong or its measured throughput is physically impossible."""
+
+
+# Theoretical peaks used for the plausibility check. RTX 3050 Laptop (GA107, 16 SMs):
+#   FP16 Tensor Core, FP32 accumulate: 16 SM x 512 FLOP/clk x ~1.74 GHz  ~= 14.3 TFLOPS
+#   FP16 Tensor Core, FP16 accumulate: 2x that                          ~= 28.5 TFLOPS
+#   DRAM: 128-bit GDDR6 @ 12-14 Gbps                                    = 192-224 GB/s
+# A measurement above the absolute ceiling (with 15% slack for boost clocks) means the
+# kernel did not do the work it claims - e.g. a failed launch timed as a 0.5 us kernel.
+DEVICE_PEAKS = {
+    "RTX 3050": {"tflops_ceiling": 28.5, "dram_gbs": 224.0},
+}
+
+
+def device_peaks() -> dict | None:
+    if not torch.cuda.is_available():
+        return None
+    name = torch.cuda.get_device_name(0)
+    for key, peaks in DEVICE_PEAKS.items():
+        if key in name:
+            return peaks
+    return None
+
+
 def run_bench(
     fn: Callable[[], Any],
     warmup: int = 10,
     repeat: int = 50,
     sync_cuda: bool = True,
+    rounds: int = 5,
 ) -> float:
-    """Run fn() warmup + repeat times; return mean latency in ms."""
+    """
+    Latency of fn() in ms.
+
+    GPU: `rounds` x (`repeat` back-to-back launches between two CUDA events); returns the median
+    of the per-round means. CUDA events measure GPU time on the stream, so host-side Python
+    overhead between launches is hidden as long as the GPU queue stays busy (as it does in a
+    real model). The median makes the number robust to laptop clock-boost / OS jitter.
+    CPU fallback: perf_counter.
+    """
     for _ in range(warmup):
         fn()
     if sync_cuda and torch.cuda.is_available():
         torch.cuda.synchronize()
-    start = time.perf_counter()
+        samples = []
+        for _ in range(rounds):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            for _ in range(repeat):
+                fn()
+            end.record()
+            end.synchronize()
+            samples.append(start.elapsed_time(end) / repeat)
+        samples.sort()
+        return samples[len(samples) // 2]
+    start_t = time.perf_counter()
     for _ in range(repeat):
         fn()
-    if sync_cuda and torch.cuda.is_available():
-        torch.cuda.synchronize()
-    return (time.perf_counter() - start) * 1000.0 / repeat
+    return (time.perf_counter() - start_t) * 1000.0 / repeat
+
+
+def check_close(name: str, out: Any, ref: torch.Tensor, atol: float = 2e-2, rtol: float = 2e-2) -> None:
+    """Correctness gate: raise BenchmarkError unless `out` matches `ref`. Call BEFORE timing."""
+    if out is None:
+        raise BenchmarkError(f"{name}: returned None (extension not built?)")
+    try:
+        torch.testing.assert_close(out.float(), ref.float(), atol=atol, rtol=rtol)
+    except AssertionError as e:
+        raise BenchmarkError(f"{name}: WRONG RESULT - not timed.\n{e}") from None
+
+
+def measure(
+    name: str,
+    fn: Callable[[], Any],
+    ref: torch.Tensor | None,
+    bytes_read: int,
+    bytes_written: int,
+    flops: float | None,
+    atol: float = 2e-2,
+    rtol: float = 2e-2,
+    warmup: int = 10,
+    repeat: int = 50,
+) -> dict[str, float] | None:
+    """Verify -> time -> plausibility-check. Returns compute_metrics() dict, or None (with a message) on failure."""
+    try:
+        if ref is not None:
+            check_close(name, fn(), ref, atol=atol, rtol=rtol)
+        lat = run_bench(fn, warmup=warmup, repeat=repeat)
+        metrics = compute_metrics(lat, bytes_read, bytes_written, flops)
+        check_plausible(name, metrics)
+        return metrics
+    except BenchmarkError as e:
+        print(f"  [skip] {e}", file=sys.stderr)
+        return None
+
+
+def check_plausible(name: str, metrics: dict[str, float]) -> None:
+    peaks = device_peaks()
+    if peaks is None:
+        return
+    gflops = metrics.get("gflops")
+    if gflops is not None and gflops > peaks["tflops_ceiling"] * 1e3 * 1.15:
+        raise BenchmarkError(
+            f"{name}: {gflops / 1e3:.1f} TFLOPS exceeds the device ceiling of {peaks['tflops_ceiling']} TFLOPS"
+            " - the kernel cannot have done the claimed work (failed launch? wrong output?)."
+        )
+    bw = metrics.get("memory_bandwidth_gbs", 0.0)
+    if bw > peaks["dram_gbs"] * 1.15:
+        # Not an error: small working sets can be served from the 2 MB L2. Flag it so it is not
+        # presented as DRAM bandwidth.
+        print(f"  [note] {name}: {bw:.0f} GB/s > DRAM peak {peaks['dram_gbs']} GB/s (L2-resident data)", file=sys.stderr)
 
 
 def sample_gpu_utilization(

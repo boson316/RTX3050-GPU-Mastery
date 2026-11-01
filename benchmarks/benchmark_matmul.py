@@ -7,7 +7,6 @@ Run from repo root: python benchmarks/benchmark_matmul.py
 """
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -21,14 +20,13 @@ import torch
 from benchmarks.bench_utils import (
     BENCHMARKS_DIR,
     PLOTS_DIR,
-    run_bench,
-    sample_gpu_utilization,
-    compute_metrics,
-    save_csv,
-    print_benchmark_table,
+    ensure_plots_dir,
+    measure,
     plot_bar_chart,
     plot_grouped_bars,
-    ensure_plots_dir,
+    print_benchmark_table,
+    sample_gpu_utilization,
+    save_csv,
 )
 
 WARMUP = 10
@@ -41,42 +39,36 @@ def _bytes(*tensors: torch.Tensor) -> int:
     return sum(t.numel() * t.element_size() for t in tensors)
 
 
-def run_pytorch(M: int, K: int, N: int) -> tuple[float, float, float]:
+def _measure(name, fn, A, B):
+    M, K = A.shape
+    N = B.shape[1]
+    ref = A.float() @ B.float()
+    m = measure(name, fn, ref, _bytes(A, B), M * N * 2, 2.0 * M * N * K,
+                atol=0.5, rtol=2e-2, warmup=WARMUP, repeat=REPEAT)  # K-length FP16 dot products
+    if m is None:
+        return None, None, None
+    return m["latency_ms"], m.get("gflops"), m["memory_bandwidth_gbs"]
+
+
+def run_pytorch(M: int, K: int, N: int):
     A = torch.randn(M, K, device="cuda", dtype=DTYPE)
     B = torch.randn(K, N, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(A, B)
-    bytes_w = M * N * 2
-    flops = 2 * M * N * K
-
-    def fn():
-        torch.matmul(A, B)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops", 0.0), m["memory_bandwidth_gbs"]
+    return _measure("cuBLAS", lambda: torch.matmul(A, B), A, B)
 
 
-def run_triton(M: int, K: int, N: int) -> tuple[float | None, float | None, float | None]:
+def run_triton(M: int, K: int, N: int):
     try:
         from triton_kernels.matmul import matmul_triton
     except Exception:
         return None, None, None
     A = torch.randn(M, K, device="cuda", dtype=DTYPE)
     B = torch.randn(K, N, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(A, B)
-    bytes_w = M * N * 2
-    flops = 2 * M * N * K
-
-    def fn():
-        matmul_triton(A, B)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops"), m["memory_bandwidth_gbs"]
+    return _measure("Triton matmul", lambda: matmul_triton(A, B), A, B)
 
 
 def run_cuda_standalone() -> tuple[float | None, float | None, float | None]:
-    """Run cuda_roadmap fp16_matmul_bench if available (fixed 1024x1024)."""
+    """Run cuda_roadmap fp16_matmul_bench (1024^3, WMMA tiled kernel). The binary verifies its own
+    output against a CPU reference and exits non-zero on mismatch, in which case nothing is reported."""
     exe = root / "cuda_roadmap" / "level4_tensor_core" / "fp16_tensor_core_matmul" / "fp16_matmul_bench"
     if sys.platform == "win32":
         exe = exe.with_suffix(".exe")
@@ -172,7 +164,7 @@ def main():
 
     fieldnames = ["implementation", "size", "latency_ms", "gflops", "memory_bandwidth_gbs", "gpu_utilization_pct"]
     save_csv(rows, BENCHMARKS_DIR / "benchmark_matmul_results.csv", fieldnames=fieldnames)
-    print(f"CSV saved: benchmarks/benchmark_matmul_results.csv")
+    print("CSV saved: benchmarks/benchmark_matmul_results.csv")
 
     print_benchmark_table(rows, title="Matmul benchmark", columns=fieldnames)
 

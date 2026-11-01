@@ -16,12 +16,23 @@ dependencies = [
 
 [project.optional-dependencies]
 triton = ["triton; sys_platform != 'win32'", "triton-windows; sys_platform == 'win32'"]
-dev = ["ruff", "pytest"]
+dev = ["ruff", "pytest", "numpy"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py310"
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
-ignore = ["E501"]
+select = ["E", "F", "I", "B"]
+# E402: runnable scripts insert the repo root into sys.path before importing project modules.
+# B023: benchmark closures are called immediately inside the loop that defines them.
+# B905: zip(strict=) is noise for the plotting helpers.
+ignore = ["E501", "E402", "B023", "B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["triton_kernels", "benchmarks", "flash_attention_simple", "gpu_kernels", "profiling", "tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

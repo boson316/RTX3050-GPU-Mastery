@@ -25,8 +25,9 @@ Register usage:
 from __future__ import annotations
 
 import torch
-import triton
 import triton.language as tl
+
+import triton
 
 # -----------------------------------------------------------------------------
 # Baseline: three-pass softmax (max, then sum(exp), then normalize)

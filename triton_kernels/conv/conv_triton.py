@@ -4,9 +4,10 @@ Triton 3x3 Conv2D for deep learning.
 Provides:
 - Baseline: one program per (batch, tile_h, tile_w, output_channel); each loads
   input on demand (no shared input tile reuse).
-- Optimized: tile input (BLOCK_H+2)x(BLOCK_W+2) once per spatial block and reuse
-  across output channels; reduces global memory traffic.
-- Autotuning over BLOCK_H, BLOCK_W, BLOCK_C.
+- Optimized: each program loads the 9 shifted input patches of a spatial tile once and
+  reuses them for BLOCK_C output channels via 9 vectorised outer-product updates.
+- Autotuning over BLOCK_OH, BLOCK_OW, BLOCK_C, num_warps (same kernel as "optimized").
+- Scope: C_in = 1, stride 1, no padding (the MNIST first layer this repo benchmarks).
 - Benchmark vs torch.nn.functional.conv2d.
 
 Block tiling:
@@ -27,8 +28,9 @@ Register usage:
 from __future__ import annotations
 
 import torch
-import triton
 import triton.language as tl
+
+import triton
 
 # -----------------------------------------------------------------------------
 # Baseline: straightforward 3x3 conv, load input per (kh,kw) and per oc
@@ -100,26 +102,23 @@ def _conv_baseline_kernel(
 
 
 # -----------------------------------------------------------------------------
-# Optimized: load input tile once; BLOCK_OH/OW (output block) and BLOCK_IH/IW (input tile) are
-# powers of 2; we require BLOCK_IH >= BLOCK_OH+2, BLOCK_IW >= BLOCK_OW+2.
+# Optimized: one program computes a [BLOCK_C output channels] x [BLOCK_OH x BLOCK_OW pixels]
+# tile. The 9 shifted input patches are loaded ONCE and reused by all BLOCK_C channels; the
+# 9 weight taps are loaded as BLOCK_C-wide vectors. The convolution becomes 9 rank-1
+# (outer-product) updates  acc[c, p] += w[c, tap] * patch_tap[p]  - fully vectorised, no
+# per-channel scalar loop.
+#
+# Fixed: the previous optimized/autotuned kernels stored to `oh * out_w + off_h * out_w + off_w`
+# without the `+ ow` column offset, so every column tile overwrote columns [0, BLOCK_OW) and the
+# output was wrong whenever out_w > BLOCK_OW (i.e. for every benchmark configuration).
 # -----------------------------------------------------------------------------
 
 
 @triton.jit
 def _conv_optimized_kernel(
-    x_ptr,
-    w_ptr,
-    b_ptr,
-    y_ptr,
-    B,
-    H,
-    W,
-    C_out,
-    out_h,
-    out_w,
-    stride_b: tl.constexpr,
-    stride_h: tl.constexpr,
-    stride_w: tl.constexpr,
+    x_ptr, w_ptr, b_ptr, y_ptr,
+    B, H, W, C_out, out_h, out_w,
+    stride_b, stride_h, stride_w,
     BLOCK_OH: tl.constexpr,
     BLOCK_OW: tl.constexpr,
     BLOCK_C: tl.constexpr,
@@ -128,117 +127,68 @@ def _conv_optimized_kernel(
     n_th = tl.cdiv(out_h, BLOCK_OH)
     n_tw = tl.cdiv(out_w, BLOCK_OW)
     n_oc = tl.cdiv(C_out, BLOCK_C)
-    pid_b = pid // (n_th * n_tw * n_oc)
-    pid_rest = pid % (n_th * n_tw * n_oc)
-    pid_th = pid_rest // (n_tw * n_oc)
-    pid_tw = (pid_rest // n_oc) % n_tw
-    pid_oc = pid_rest % n_oc
+    # channel-block is the fastest-varying index: consecutive programs reuse the same input
+    # patch from L1/L2 for different output channels
+    pid_oc = pid % n_oc
+    pid_tw = (pid // n_oc) % n_tw
+    pid_th = (pid // (n_oc * n_tw)) % n_th
+    pid_b = pid // (n_oc * n_tw * n_th)
 
-    oh = pid_th * BLOCK_OH
-    ow = pid_tw * BLOCK_OW
-    oc_base = pid_oc * BLOCK_C
+    offs_c = pid_oc * BLOCK_C + tl.arange(0, BLOCK_C)
+    offs_p = tl.arange(0, BLOCK_OH * BLOCK_OW)
+    ph = pid_th * BLOCK_OH + offs_p // BLOCK_OW   # output row of each pixel in the tile
+    pw = pid_tw * BLOCK_OW + offs_p % BLOCK_OW    # output col
+    c_mask = offs_c < C_out
+    p_mask = (ph < out_h) & (pw < out_w)          # valid output => all 9 taps are in bounds
 
-    off_h = tl.arange(0, BLOCK_OH)
-    off_w = tl.arange(0, BLOCK_OW)
-    mask_sp = (oh + off_h[:, None] < out_h) & (ow + off_w[None, :] < out_w)
+    x_base = x_ptr + pid_b.to(tl.int64) * stride_b
+    acc = tl.zeros((BLOCK_C, BLOCK_OH * BLOCK_OW), dtype=tl.float32)
+    for tap in tl.static_range(9):
+        kh = tap // 3
+        kw = tap % 3
+        patch = tl.load(x_base + (ph + kh) * stride_h + (pw + kw) * stride_w, mask=p_mask, other=0.0)
+        wt = tl.load(w_ptr + offs_c * 9 + tap, mask=c_mask, other=0.0)
+        acc += wt.to(tl.float32)[:, None] * patch.to(tl.float32)[None, :]
+    acc += tl.load(b_ptr + offs_c, mask=c_mask, other=0.0).to(tl.float32)[:, None]
 
-    # Load 9 (BLOCK_OH, BLOCK_OW) blocks for 3x3 kernel; reuse across BLOCK_C (unrolled)
-    in_m = (oh + 2 + off_h[:, None] < H) & (ow + 2 + off_w[None, :] < W)
-    b00 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b01 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b02 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b10 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b11 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b12 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b20 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b21 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b22 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-
-    for c in range(BLOCK_C):
-        oc = oc_base + c
-        if oc < C_out:
-            w0 = tl.load(w_ptr + oc * 9 + 0).to(tl.float32)
-            w1 = tl.load(w_ptr + oc * 9 + 1).to(tl.float32)
-            w2 = tl.load(w_ptr + oc * 9 + 2).to(tl.float32)
-            w3 = tl.load(w_ptr + oc * 9 + 3).to(tl.float32)
-            w4 = tl.load(w_ptr + oc * 9 + 4).to(tl.float32)
-            w5 = tl.load(w_ptr + oc * 9 + 5).to(tl.float32)
-            w6 = tl.load(w_ptr + oc * 9 + 6).to(tl.float32)
-            w7 = tl.load(w_ptr + oc * 9 + 7).to(tl.float32)
-            w8 = tl.load(w_ptr + oc * 9 + 8).to(tl.float32)
-            acc = b00 * w0 + b01 * w1 + b02 * w2 + b10 * w3 + b11 * w4 + b12 * w5 + b20 * w6 + b21 * w7 + b22 * w8
-            acc += tl.load(b_ptr + oc).to(tl.float32)
-            tl.store(
-                y_ptr + pid_b * C_out * out_h * out_w + oc * out_h * out_w
-                + oh * out_w
-                + off_h[:, None] * out_w
-                + off_w[None, :],
-                acc.to(x_ptr.dtype.element_ty),
-                mask=mask_sp,
-            )
+    y_base = y_ptr + pid_b.to(tl.int64) * C_out * out_h * out_w
+    y_ptrs = y_base + offs_c[:, None] * (out_h * out_w) + (ph * out_w + pw)[None, :]
+    tl.store(y_ptrs, acc.to(y_ptr.dtype.element_ty), mask=c_mask[:, None] & p_mask[None, :])
 
 
-def _conv_impl(
-    x: torch.Tensor,
-    w: torch.Tensor,
-    b: torch.Tensor,
-    BLOCK_H: int,
-    BLOCK_W: int,
-    BLOCK_C: int,
-    kernel_fn,
-) -> torch.Tensor:
+def _conv_prepare(x, w, b):
+    assert x.dim() == 4 and x.shape[1] == 1, "this kernel implements C_in = 1 (MNIST-style first layer)"
+    assert w.shape[1:] == (1, 3, 3), "expected 3x3 weights of shape (C_out, 1, 3, 3)"
     B, _, H, W = x.shape
     C_out = w.shape[0]
-    out_h, out_w = H - 2, W - 2
     x = x.contiguous()
-    w = w.contiguous()
+    w_flat = w.contiguous().view(C_out, 9)
     b = b.contiguous()
-    w_flat = w.view(C_out, -1)
-    y = torch.empty((B, C_out, out_h, out_w), device=x.device, dtype=x.dtype)
+    y = torch.empty((B, C_out, H - 2, W - 2), device=x.device, dtype=x.dtype)
+    return x, w_flat, b, y, B, H, W, C_out
 
+
+def _conv_impl(x, w, b, BLOCK_H, BLOCK_W, BLOCK_C, kernel_fn):
+    x, w_flat, b, y, B, H, W, C_out = _conv_prepare(x, w, b)
+    out_h, out_w = H - 2, W - 2
     grid = (B * triton.cdiv(out_h, BLOCK_H) * triton.cdiv(out_w, BLOCK_W) * triton.cdiv(C_out, BLOCK_C),)
     kernel_fn[grid](
-        x,
-        w_flat,
-        b,
-        y,
-        B=B,
-        H=H,
-        W=W,
-        C_out=C_out,
-        out_h=out_h,
-        out_w=out_w,
-        stride_b=x.stride(0),
-        stride_h=x.stride(2),
-        stride_w=x.stride(3),
-        BLOCK_H=BLOCK_H,
-        BLOCK_W=BLOCK_W,
-        BLOCK_C=BLOCK_C,
+        x, w_flat, b, y,
+        B=B, H=H, W=W, C_out=C_out, out_h=out_h, out_w=out_w,
+        stride_b=x.stride(0), stride_h=x.stride(2), stride_w=x.stride(3),
+        BLOCK_H=BLOCK_H, BLOCK_W=BLOCK_W, BLOCK_C=BLOCK_C,
     )
     return y
 
 
-def _conv_optimized_impl(
-    x: torch.Tensor,
-    w: torch.Tensor,
-    b: torch.Tensor,
-    BLOCK_OH: int,
-    BLOCK_OW: int,
-    BLOCK_C: int,
-) -> torch.Tensor:
-    B, _, H, W = x.shape
-    C_out = w.shape[0]
+def _conv_optimized_impl(x, w, b, BLOCK_OH, BLOCK_OW, BLOCK_C):
+    x, w_flat, b, y, B, H, W, C_out = _conv_prepare(x, w, b)
     out_h, out_w = H - 2, W - 2
-    x = x.contiguous()
-    w = w.contiguous()
-    b = b.contiguous()
-    w_flat = w.view(C_out, -1)
-    y = torch.empty((B, C_out, out_h, out_w), device=x.device, dtype=x.dtype)
     grid = (B * triton.cdiv(out_h, BLOCK_OH) * triton.cdiv(out_w, BLOCK_OW) * triton.cdiv(C_out, BLOCK_C),)
     _conv_optimized_kernel[grid](
         x, w_flat, b, y,
-        B=B, H=H, W=W, C_out=C_out, out_h=out_h, out_w=out_w,
-        stride_b=x.stride(0), stride_h=x.stride(2), stride_w=x.stride(3),
+        B, H, W, C_out, out_h, out_w,
+        x.stride(0), x.stride(2), x.stride(3),
         BLOCK_OH=BLOCK_OH, BLOCK_OW=BLOCK_OW, BLOCK_C=BLOCK_C,
     )
     return y
@@ -273,86 +223,16 @@ def conv2d_optimized(
 # -----------------------------------------------------------------------------
 
 
-@triton.autotune(
+_conv_autotuned_kernel = triton.autotune(
     configs=[
-        triton.Config({"BLOCK_OH": 8, "BLOCK_OW": 8, "BLOCK_C": 16}, num_warps=2),
-        triton.Config({"BLOCK_OH": 8, "BLOCK_OW": 8, "BLOCK_C": 32}, num_warps=4),
-        triton.Config({"BLOCK_OH": 16, "BLOCK_OW": 8, "BLOCK_C": 32}, num_warps=4),
-        triton.Config({"BLOCK_OH": 8, "BLOCK_OW": 16, "BLOCK_C": 32}, num_warps=4),
-        triton.Config({"BLOCK_OH": 16, "BLOCK_OW": 16, "BLOCK_C": 32}, num_warps=8),
+        triton.Config({"BLOCK_OH": oh, "BLOCK_OW": ow, "BLOCK_C": c}, num_warps=w)
+        for oh, ow, c, w in [
+            (8, 8, 16, 4), (8, 16, 16, 4), (16, 16, 16, 4),
+            (8, 8, 32, 4), (8, 16, 32, 4), (16, 16, 32, 8),
+        ]
     ],
     key=["B", "out_h", "out_w", "C_out"],
-)
-@triton.jit
-def _conv_autotuned_kernel(
-    x_ptr,
-    w_ptr,
-    b_ptr,
-    y_ptr,
-    B,
-    H,
-    W,
-    C_out,
-    out_h,
-    out_w,
-    stride_b: tl.constexpr,
-    stride_h: tl.constexpr,
-    stride_w: tl.constexpr,
-    BLOCK_OH: tl.constexpr,
-    BLOCK_OW: tl.constexpr,
-    BLOCK_C: tl.constexpr,
-):
-    pid = tl.program_id(0)
-    n_th = tl.cdiv(out_h, BLOCK_OH)
-    n_tw = tl.cdiv(out_w, BLOCK_OW)
-    n_oc = tl.cdiv(C_out, BLOCK_C)
-    pid_b = pid // (n_th * n_tw * n_oc)
-    pid_rest = pid % (n_th * n_tw * n_oc)
-    pid_th = pid_rest // (n_tw * n_oc)
-    pid_tw = (pid_rest // n_oc) % n_tw
-    pid_oc = pid_rest % n_oc
-
-    oh = pid_th * BLOCK_OH
-    ow = pid_tw * BLOCK_OW
-    oc_base = pid_oc * BLOCK_C
-
-    off_h = tl.arange(0, BLOCK_OH)
-    off_w = tl.arange(0, BLOCK_OW)
-    mask_sp = (oh + off_h[:, None] < out_h) & (ow + off_w[None, :] < out_w)
-
-    in_m = (oh + 2 + off_h[:, None] < H) & (ow + 2 + off_w[None, :] < W)
-    b00 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b01 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b02 = tl.load(x_ptr + pid_b * stride_b + (oh + 0 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b10 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b11 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b12 = tl.load(x_ptr + pid_b * stride_b + (oh + 1 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b20 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 0 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b21 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 1 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-    b22 = tl.load(x_ptr + pid_b * stride_b + (oh + 2 + off_h[:, None]) * stride_h + (ow + 2 + off_w[None, :]) * stride_w, mask=in_m, other=0.0).to(tl.float32)
-
-    for c in range(BLOCK_C):
-        oc = oc_base + c
-        if oc < C_out:
-            w0 = tl.load(w_ptr + oc * 9 + 0).to(tl.float32)
-            w1 = tl.load(w_ptr + oc * 9 + 1).to(tl.float32)
-            w2 = tl.load(w_ptr + oc * 9 + 2).to(tl.float32)
-            w3 = tl.load(w_ptr + oc * 9 + 3).to(tl.float32)
-            w4 = tl.load(w_ptr + oc * 9 + 4).to(tl.float32)
-            w5 = tl.load(w_ptr + oc * 9 + 5).to(tl.float32)
-            w6 = tl.load(w_ptr + oc * 9 + 6).to(tl.float32)
-            w7 = tl.load(w_ptr + oc * 9 + 7).to(tl.float32)
-            w8 = tl.load(w_ptr + oc * 9 + 8).to(tl.float32)
-            acc = b00 * w0 + b01 * w1 + b02 * w2 + b10 * w3 + b11 * w4 + b12 * w5 + b20 * w6 + b21 * w7 + b22 * w8
-            acc += tl.load(b_ptr + oc).to(tl.float32)
-            tl.store(
-                y_ptr + pid_b * C_out * out_h * out_w + oc * out_h * out_w
-                + oh * out_w
-                + off_h[:, None] * out_w
-                + off_w[None, :],
-                acc.to(x_ptr.dtype.element_ty),
-                mask=mask_sp,
-            )
+)(_conv_optimized_kernel)
 
 
 def conv2d_triton(
@@ -364,30 +244,20 @@ def conv2d_triton(
     BLOCK_C: int | None = None,
     use_autotune: bool = True,
 ) -> torch.Tensor:
-    """
-    3x3 Conv2D; FP16/BF16. If use_autotune=True and BLOCK_* are None, uses autotuned config.
-    """
-    B, _, H, W = x.shape
-    C_out = w.shape[0]
-    out_h, out_w = H - 2, W - 2
-    x = x.contiguous()
-    w = w.contiguous()
-    b = b.contiguous()
-    w_flat = w.view(C_out, -1)
-    y = torch.empty((B, C_out, out_h, out_w), device=x.device, dtype=x.dtype)
-
+    """3x3 valid Conv2D, C_in = 1. FP16/BF16/FP32. Autotuned unless explicit block sizes are given."""
     if use_autotune and BLOCK_H is None and BLOCK_W is None and BLOCK_C is None:
-        grid = lambda meta: (
-            B * triton.cdiv(out_h, meta["BLOCK_OH"]) * triton.cdiv(out_w, meta["BLOCK_OW"]) * triton.cdiv(C_out, meta["BLOCK_C"]),
+        x, w_flat, b, y, B, H, W, C_out = _conv_prepare(x, w, b)
+        out_h, out_w = H - 2, W - 2
+        grid = lambda meta: (  # noqa: E731
+            B * triton.cdiv(out_h, meta["BLOCK_OH"]) * triton.cdiv(out_w, meta["BLOCK_OW"])
+            * triton.cdiv(C_out, meta["BLOCK_C"]),
         )
         _conv_autotuned_kernel[grid](
-            x, w_flat, b, y,
-            B=B, H=H, W=W, C_out=C_out, out_h=out_h, out_w=out_w,
-            stride_b=x.stride(0), stride_h=x.stride(2), stride_w=x.stride(3),
+            x, w_flat, b, y, B, H, W, C_out, out_h, out_w,
+            x.stride(0), x.stride(2), x.stride(3),
         )
         return y
-
-    return _conv_optimized_impl(x, w, b, 8, 8, BLOCK_C or 32)
+    return _conv_optimized_impl(x, w, b, BLOCK_H or 8, BLOCK_W or 16, BLOCK_C or 32)
 
 
 # -----------------------------------------------------------------------------
@@ -419,7 +289,10 @@ def benchmark_conv(
         torch.cuda.synchronize()
         return (__import__("time").perf_counter() - start) * 1000 / repeat
 
-    ref = torch.nn.functional.conv2d(x, w, b, padding=0)
+    ref = torch.nn.functional.conv2d(x.float(), w.float(), b.float(), padding=0).to(dtype)
+    # Correctness gate: never time a kernel that produces the wrong answer.
+    for name, fn in [("baseline", conv2d_baseline), ("optimized", conv2d_optimized), ("autotune", conv2d_triton)]:
+        torch.testing.assert_close(fn(x, w, b), ref, atol=5e-2, rtol=1e-2, msg=lambda m, n=name: f"conv2d {n}: {m}")
 
     out = {}
     out["pytorch_ms"] = run(lambda: torch.nn.functional.conv2d(x, w, b, padding=0))

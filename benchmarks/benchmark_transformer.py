@@ -1,18 +1,20 @@
 """
-Transformer kernels benchmark: PyTorch vs Triton vs CUDA (QKV, Softmax, LayerNorm, GELU, MLP).
-Measures: latency (ms), throughput (GFLOPS where applicable), memory bandwidth (GB/s), optional GPU utilization.
-Outputs: CSV, benchmark table, matplotlib charts in benchmarks/plots/.
+Transformer building blocks: PyTorch vs Triton vs custom CUDA (FP16).
+Kernels: QKV projection, Softmax, LayerNorm, GELU, MLP (GEMM -> bias+GELU -> GEMM -> bias).
 
-Run from repo root: python benchmarks/benchmark_transformer.py
+Every implementation is first checked against the PyTorch reference (FP32 math) and is only
+timed if it is correct; results above the hardware ceiling are rejected (bench_utils.measure).
+
+Run from repo root:  python benchmarks/benchmark_transformer.py
 Env:
-  TRANSFORMER_BENCHMARK_CUDA=1   — enable CUDA for QKV and MLP only (avoids hang).
-  TRANSFORMER_BENCHMARK_CUDA_ALL=1 — also run CUDA for Softmax/LayerNorm/GELU (may hang on some GPUs).
+  TRANSFORMER_BENCHMARK_CUDA=0   skip the custom CUDA extension (it is JIT-built on first use)
+  TRANSFORMER_BENCHMARK_FULL=1   B=32, S=512 instead of B=8, S=256
 """
 from __future__ import annotations
 
 import os
 import sys
-import time
+from collections.abc import Callable
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
@@ -20,265 +22,182 @@ sys.path.insert(0, str(root))
 
 import torch
 
-from benchmarks.transformer_reference import (
-    fused_qkv_pytorch,
-    softmax_pytorch,
-    layernorm_pytorch,
-    gelu_pytorch,
-    fused_mlp_pytorch,
-)
 from benchmarks.bench_utils import (
     BENCHMARKS_DIR,
     PLOTS_DIR,
-    run_bench,
-    sample_gpu_utilization,
-    compute_metrics,
-    save_csv,
-    print_benchmark_table,
+    ensure_plots_dir,
+    measure,
     plot_bar_chart,
     plot_grouped_bars,
-    ensure_plots_dir,
+    print_benchmark_table,
+    save_csv,
+)
+from benchmarks.transformer_reference import (
+    fused_mlp_pytorch,
+    fused_qkv_pytorch,
+    gelu_pytorch,
+    layernorm_pytorch,
+    softmax_pytorch,
 )
 
-_enable_cuda = os.environ.get("TRANSFORMER_BENCHMARK_CUDA", "").strip().lower() in ("1", "true", "yes")
-# Softmax/LayerNorm/GELU CUDA can hang on some devices — only run when explicitly requested
-_run_cuda_softmax_ln_gelu = os.environ.get("TRANSFORMER_BENCHMARK_CUDA_ALL", "").strip().lower() in ("1", "true", "yes")
-SKIP_CUDA = not _enable_cuda
-
-B, S, H = 8, 256, 768
-H3 = H * 3
-H4 = H * 4
-WARMUP, REPEAT = 5, 15
-CUDA_WARMUP, CUDA_REPEAT = 2, 5
+USE_CUDA_EXT = os.environ.get("TRANSFORMER_BENCHMARK_CUDA", "1").strip().lower() not in ("0", "false", "no")
+FULL = os.environ.get("TRANSFORMER_BENCHMARK_FULL", "").strip().lower() in ("1", "true", "yes")
+B, S, H = (32, 512, 768) if FULL else (8, 256, 768)
 DTYPE = torch.float16
+WARMUP, REPEAT = 10, 50
+KERNELS = ["QKV", "Softmax", "LayerNorm", "GELU", "MLP"]
+IMPLS = ["PyTorch", "Triton", "CUDA"]
 
 
-def _bytes(*tensors: torch.Tensor) -> int:
+def nbytes(*tensors: torch.Tensor) -> int:
     return sum(t.numel() * t.element_size() for t in tensors)
 
 
-def bench_qkv() -> list[dict]:
-    M, K, N = B * S, H, H3
-    x = torch.randn(M, K, device="cuda", dtype=DTYPE)
-    w = torch.randn(K, N, device="cuda", dtype=DTYPE)
-    b = torch.randn(N, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x, w, b)
-    bytes_w = M * N * 2
-    flops = 2 * M * N * K
-    rows = []
-
-    lat = run_bench(lambda: fused_qkv_pytorch(x, w, b), warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    rows.append({"kernel": "QKV", "implementation": "PyTorch", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-
+def _optional(import_fn: Callable[[], Callable]) -> Callable | None:
     try:
-        from triton_kernels.qkv import fused_qkv_triton
-        lat = run_bench(lambda: fused_qkv_triton(x, w, b), warmup=WARMUP, repeat=REPEAT)
-        m = compute_metrics(lat, bytes_r, bytes_w, flops)
-        rows.append({"kernel": "QKV", "implementation": "Triton", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-    except Exception:
-        pass
-
-    if not SKIP_CUDA:
-        try:
-            from gpu_kernels.transformer.transformer_cuda import fused_qkv_cuda
-            out = fused_qkv_cuda(x, w, b)
-            if out is not None:
-                lat = run_bench(lambda: fused_qkv_cuda(x, w, b), warmup=CUDA_WARMUP, repeat=CUDA_REPEAT)
-                m = compute_metrics(lat, bytes_r, bytes_w, flops)
-                rows.append({"kernel": "QKV", "implementation": "CUDA", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-        except Exception:
-            pass
-    return rows
+        return import_fn()
+    except Exception as e:  # noqa: BLE001 - report and continue with the other implementations
+        print(f"  [skip] import failed: {e}", file=sys.stderr)
+        return None
 
 
-def bench_softmax() -> list[dict]:
-    M, N = B * S, H
-    x = torch.randn(M, N, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x)
-    bytes_w = x.numel() * 2
+def _triton(name: str):
+    import importlib
+
+    module, fn = {
+        "qkv": ("triton_kernels.qkv", "fused_qkv_triton"),
+        "softmax": ("triton_kernels.softmax", "softmax_triton"),
+        "layernorm": ("triton_kernels.layernorm", "layernorm_triton"),
+        "gelu": ("triton_kernels.gelu", "gelu_triton"),
+        "mlp": ("triton_kernels.mlp", "fused_mlp_triton"),
+    }[name]
+    return _optional(lambda: getattr(importlib.import_module(module), fn))
+
+
+def _cuda(name: str):
+    if not USE_CUDA_EXT:
+        return None
+    from gpu_kernels.transformer import transformer_cuda as tc
+
+    if tc._load_extension() is None:
+        return None
+    return {
+        "qkv": tc.fused_qkv_cuda,
+        "softmax": tc.softmax_cuda,
+        "layernorm": tc.layernorm_cuda,
+        "gelu": tc.gelu_cuda,
+        "mlp": tc.fused_mlp_cuda,
+    }[name]
+
+
+def _row(kernel: str, impl: str, m: dict | None) -> dict | None:
+    if m is None:
+        return None
+    return {
+        "kernel": kernel,
+        "implementation": impl,
+        "latency_ms": round(m["latency_ms"], 4),
+        "gflops": round(m["gflops"], 1) if "gflops" in m else None,
+        "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 1),
+    }
+
+
+def run_case(kernel: str, candidates: list[tuple[str, Callable | None]], ref: torch.Tensor,
+             bytes_r: int, bytes_w: int, flops: float | None) -> list[dict]:
     rows = []
-
-    lat = run_bench(lambda: softmax_pytorch(x, dim=-1), warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, None)
-    rows.append({"kernel": "Softmax", "implementation": "PyTorch", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-
-    try:
-        from triton_kernels.softmax import softmax_triton
-        lat = run_bench(lambda: softmax_triton(x, dim=-1), warmup=WARMUP, repeat=REPEAT)
-        m = compute_metrics(lat, bytes_r, bytes_w, None)
-        rows.append({"kernel": "Softmax", "implementation": "Triton", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-    except Exception:
-        pass
-
-    if not SKIP_CUDA and _run_cuda_softmax_ln_gelu:
-        try:
-            from gpu_kernels.transformer.transformer_cuda import softmax_cuda
-            if softmax_cuda(x, -1) is not None:
-                lat = run_bench(lambda: softmax_cuda(x, -1), warmup=CUDA_WARMUP, repeat=CUDA_REPEAT)
-                m = compute_metrics(lat, bytes_r, bytes_w, None)
-                rows.append({"kernel": "Softmax", "implementation": "CUDA", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-        except Exception:
-            pass
-    return rows
-
-
-def bench_layernorm() -> list[dict]:
-    M, N = B * S, H
-    x = torch.randn(M, N, device="cuda", dtype=DTYPE)
-    weight = torch.ones(N, device="cuda", dtype=DTYPE)
-    bias = torch.zeros(N, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x, weight, bias)
-    bytes_w = x.numel() * 2
-    rows = []
-
-    lat = run_bench(lambda: layernorm_pytorch(x, weight, bias), warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, None)
-    rows.append({"kernel": "LayerNorm", "implementation": "PyTorch", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-
-    try:
-        from triton_kernels.layernorm import layernorm_triton
-        lat = run_bench(lambda: layernorm_triton(x, (N,), weight, bias), warmup=WARMUP, repeat=REPEAT)
-        m = compute_metrics(lat, bytes_r, bytes_w, None)
-        rows.append({"kernel": "LayerNorm", "implementation": "Triton", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-    except Exception:
-        pass
-
-    if not SKIP_CUDA and _run_cuda_softmax_ln_gelu:
-        try:
-            from gpu_kernels.transformer.transformer_cuda import layernorm_cuda
-            if layernorm_cuda(x, weight, bias, 1e-5) is not None:
-                lat = run_bench(lambda: layernorm_cuda(x, weight, bias, 1e-5), warmup=CUDA_WARMUP, repeat=CUDA_REPEAT)
-                m = compute_metrics(lat, bytes_r, bytes_w, None)
-                rows.append({"kernel": "LayerNorm", "implementation": "CUDA", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-        except Exception:
-            pass
-    return rows
-
-
-def bench_gelu() -> list[dict]:
-    n = B * S * H
-    x = torch.randn(n, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x)
-    bytes_w = x.numel() * 2
-    rows = []
-
-    lat = run_bench(lambda: gelu_pytorch(x), warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, None)
-    rows.append({"kernel": "GELU", "implementation": "PyTorch", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-
-    try:
-        from triton_kernels.gelu import gelu_triton
-        lat = run_bench(lambda: gelu_triton(x), warmup=WARMUP, repeat=REPEAT)
-        m = compute_metrics(lat, bytes_r, bytes_w, None)
-        rows.append({"kernel": "GELU", "implementation": "Triton", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-    except Exception:
-        pass
-
-    if not SKIP_CUDA and _run_cuda_softmax_ln_gelu:
-        try:
-            from gpu_kernels.transformer.transformer_cuda import gelu_cuda
-            if gelu_cuda(x) is not None:
-                lat = run_bench(lambda: gelu_cuda(x), warmup=CUDA_WARMUP, repeat=CUDA_REPEAT)
-                m = compute_metrics(lat, bytes_r, bytes_w, None)
-                rows.append({"kernel": "GELU", "implementation": "CUDA", "latency_ms": round(lat, 4), "gflops": None, "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-        except Exception:
-            pass
-    return rows
-
-
-def bench_mlp() -> list[dict]:
-    M, K, N1, N2 = B * S, H, H4, H
-    x = torch.randn(M, K, device="cuda", dtype=DTYPE)
-    w1 = torch.randn(K, N1, device="cuda", dtype=DTYPE)
-    b1 = torch.randn(N1, device="cuda", dtype=DTYPE)
-    w2 = torch.randn(N1, N2, device="cuda", dtype=DTYPE)
-    b2 = torch.randn(N2, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x, w1, b1, w2, b2) + M * N1 * 2
-    bytes_w = M * N2 * 2
-    flops = 2 * M * K * N1 + 2 * M * N1 * N2
-    rows = []
-
-    lat = run_bench(lambda: fused_mlp_pytorch(x, w1, b1, w2, b2), warmup=WARMUP, repeat=REPEAT)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    rows.append({"kernel": "MLP", "implementation": "PyTorch", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-
-    try:
-        from triton_kernels.mlp import fused_mlp_triton
-        lat = run_bench(lambda: fused_mlp_triton(x, w1, b1, w2, b2), warmup=WARMUP, repeat=REPEAT)
-        m = compute_metrics(lat, bytes_r, bytes_w, flops)
-        rows.append({"kernel": "MLP", "implementation": "Triton", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-    except Exception:
-        pass
-
-    if not SKIP_CUDA:
-        try:
-            from gpu_kernels.transformer.transformer_cuda import fused_mlp_cuda
-            if fused_mlp_cuda(x, w1, b1, w2, b2) is not None:
-                lat = run_bench(lambda: fused_mlp_cuda(x, w1, b1, w2, b2), warmup=CUDA_WARMUP, repeat=CUDA_REPEAT)
-                m = compute_metrics(lat, bytes_r, bytes_w, flops)
-                rows.append({"kernel": "MLP", "implementation": "CUDA", "latency_ms": round(lat, 4), "gflops": round(m.get("gflops", 0), 2), "memory_bandwidth_gbs": round(m["memory_bandwidth_gbs"], 2)})
-        except Exception:
-            pass
-    return rows
-
-
-def main():
-    if not torch.cuda.is_available():
-        print("CUDA not available; run on GPU for meaningful results.")
-        return
-
-    ensure_plots_dir()
-    device_name = torch.cuda.get_device_name(0)
-    print(f"Transformer kernels benchmark (FP16) — {device_name}")
-    print(f"B={B}, S={S}, H={H}; CUDA (QKV+MLP): {'on' if _enable_cuda else 'off'}; CUDA Softmax/LN/GELU: {'on' if _run_cuda_softmax_ln_gelu else 'off (set CUDA_ALL=1 to enable)'}")
-
-    all_rows: list[dict] = []
-    for bench_fn in [bench_qkv, bench_softmax, bench_layernorm, bench_gelu, bench_mlp]:
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        time.sleep(0.3)
-        all_rows.extend(bench_fn())
-
-    fieldnames = ["kernel", "implementation", "latency_ms", "gflops", "memory_bandwidth_gbs"]
-    save_csv(all_rows, BENCHMARKS_DIR / "benchmark_transformer_results.csv", fieldnames=fieldnames)
-    print(f"CSV saved: benchmarks/benchmark_transformer_results.csv")
-
-    print_benchmark_table(all_rows, title="Transformer kernels", columns=fieldnames)
-
-    for kernel in ["QKV", "Softmax", "LayerNorm", "GELU", "MLP"]:
-        sub = [r for r in all_rows if r["kernel"] == kernel]
-        if not sub:
+    for impl, fn in candidates:
+        if fn is None:
             continue
-        labels = [r["implementation"] for r in sub]
-        latencies = [r["latency_ms"] for r in sub]
-        plot_bar_chart(
-            labels, latencies,
-            ylabel="Latency (ms)", title=f"Transformer {kernel} — Latency",
-            filename=f"transformer_{kernel.lower()}_latency.png",
-        )
-        if any(r.get("gflops") is not None for r in sub):
-            gflops_vals = [r.get("gflops") or 0 for r in sub]
-            plot_bar_chart(
-                labels, gflops_vals,
-                ylabel="GFLOPS", title=f"Transformer {kernel} — Throughput",
-                filename=f"transformer_{kernel.lower()}_gflops.png",
-            )
+        r = _row(kernel, impl, measure(f"{kernel}/{impl}", fn, ref, bytes_r, bytes_w, flops,
+                                       warmup=WARMUP, repeat=REPEAT))
+        if r:
+            rows.append(r)
+    return rows
 
-    impls = ["PyTorch", "Triton", "CUDA"]
-    kernels_ordered = ["QKV", "Softmax", "LayerNorm", "GELU", "MLP"]
-    data = {impl: [] for impl in impls}
-    for kernel in kernels_ordered:
-        for impl in impls:
-            r = next((x for x in all_rows if x["kernel"] == kernel and x["implementation"] == impl), None)
-            data[impl].append(r["latency_ms"] if r else 0.0)
-    plot_grouped_bars(
-        kernels_ordered, impls, data,
-        ylabel="Latency (ms)", title="Transformer kernels latency",
-        filename="transformer_latency_by_kernel.png",
-    )
-    print(f"Charts saved to {PLOTS_DIR}")
-    print("Done.")
+
+def main() -> None:
+    if not torch.cuda.is_available():
+        print("CUDA not available; run on a GPU.")
+        return
+    torch.manual_seed(0)
+    ensure_plots_dir()
+    print(f"Transformer kernels (FP16) on {torch.cuda.get_device_name(0)}: B={B} S={S} H={H}, CUDA ext: {USE_CUDA_EXT}")
+    M = B * S
+    dev = "cuda"
+    rows: list[dict] = []
+
+    # QKV: y = x @ W_qkv + b
+    x = torch.randn(M, H, device=dev, dtype=DTYPE)
+    w = torch.randn(H, 3 * H, device=dev, dtype=DTYPE) / H**0.5
+    b = torch.randn(3 * H, device=dev, dtype=DTYPE) * 0.1
+    ref = (x.float() @ w.float() + b.float())
+    t, c = _triton("qkv"), _cuda("qkv")
+    rows += run_case("QKV", [
+        ("PyTorch", lambda: fused_qkv_pytorch(x, w, b)),
+        ("Triton", t and (lambda: t(x, w, b))),
+        ("CUDA", c and (lambda: c(x, w, b))),
+    ], ref, nbytes(x, w, b), M * 3 * H * 2, 2.0 * M * H * 3 * H)
+
+    # Softmax over the last dim (attention-score-like rows)
+    xs = torch.randn(M, H, device=dev, dtype=DTYPE) * 3
+    ref = torch.softmax(xs.float(), -1)
+    t, c = _triton("softmax"), _cuda("softmax")
+    rows += run_case("Softmax", [
+        ("PyTorch", lambda: softmax_pytorch(xs, -1)),
+        ("Triton", t and (lambda: t(xs, dim=-1))),
+        ("CUDA", c and (lambda: c(xs, -1))),
+    ], ref, nbytes(xs), nbytes(xs), None)
+
+    # LayerNorm (non-trivial affine params so a broken gamma/beta path would be caught)
+    xl = torch.randn(M, H, device=dev, dtype=DTYPE) * 2 + 1
+    g = torch.randn(H, device=dev, dtype=DTYPE)
+    be = torch.randn(H, device=dev, dtype=DTYPE)
+    ref = torch.nn.functional.layer_norm(xl.float(), (H,), g.float(), be.float(), 1e-5)
+    t, c = _triton("layernorm"), _cuda("layernorm")
+    rows += run_case("LayerNorm", [
+        ("PyTorch", lambda: layernorm_pytorch(xl, g, be)),
+        ("Triton", t and (lambda: t(xl, (H,), g, be))),
+        ("CUDA", c and (lambda: c(xl, g, be, 1e-5))),
+    ], ref, nbytes(xl, g, be), nbytes(xl), None)
+
+    # GELU. Triton implements the exact (erf) form, the CUDA kernel the tanh form: each is
+    # verified against its own definition, and both are timed on the same tensor.
+    xg = torch.randn(M * H, device=dev, dtype=DTYPE) * 2
+    t, c = _triton("gelu"), _cuda("gelu")
+    rows += run_case("GELU", [("PyTorch", lambda: gelu_pytorch(xg)), ("Triton", t and (lambda: t(xg)))],
+                     torch.nn.functional.gelu(xg.float()), nbytes(xg), nbytes(xg), None)
+    rows += run_case("GELU", [("CUDA", c and (lambda: c(xg)))],
+                     torch.nn.functional.gelu(xg.float(), approximate="tanh"), nbytes(xg), nbytes(xg), None)
+
+    # MLP: H -> 4H -> H
+    xm = torch.randn(M, H, device=dev, dtype=DTYPE)
+    w1 = torch.randn(H, 4 * H, device=dev, dtype=DTYPE) / H**0.5
+    b1 = torch.randn(4 * H, device=dev, dtype=DTYPE) * 0.1
+    w2 = torch.randn(4 * H, H, device=dev, dtype=DTYPE) / (4 * H) ** 0.5
+    b2 = torch.randn(H, device=dev, dtype=DTYPE) * 0.1
+    ref = fused_mlp_pytorch(xm.float(), w1.float(), b1.float(), w2.float(), b2.float())
+    t, c = _triton("mlp"), _cuda("mlp")
+    rows += run_case("MLP", [
+        ("PyTorch", lambda: fused_mlp_pytorch(xm, w1, b1, w2, b2)),
+        ("Triton", t and (lambda: t(xm, w1, b1, w2, b2))),
+        ("CUDA", c and (lambda: c(xm, w1, b1, w2, b2))),
+    ], ref, nbytes(xm, w1, b1, w2, b2), M * H * 2, 2.0 * M * H * 4 * H * 2)
+
+    fields = ["kernel", "implementation", "latency_ms", "gflops", "memory_bandwidth_gbs"]
+    save_csv(rows, BENCHMARKS_DIR / "benchmark_transformer_results.csv", fieldnames=fields)
+    print_benchmark_table(rows, title="Transformer kernels (verified)", columns=fields)
+
+    for kernel in KERNELS:
+        sub = [r for r in rows if r["kernel"] == kernel]
+        if sub:
+            plot_bar_chart([r["implementation"] for r in sub], [r["latency_ms"] for r in sub],
+                           ylabel="Latency (ms)", title=f"Transformer {kernel} - latency",
+                           filename=f"transformer_{kernel.lower()}_latency.png")
+    data = {impl: [next((r["latency_ms"] for r in rows if r["kernel"] == k and r["implementation"] == impl), 0.0)
+                   for k in KERNELS] for impl in IMPLS}
+    plot_grouped_bars(KERNELS, IMPLS, data, ylabel="Latency (ms)", title="Transformer kernels latency",
+                      filename="transformer_latency_by_kernel.png")
+    print(f"CSV: benchmarks/benchmark_transformer_results.csv, charts: {PLOTS_DIR}")
 
 
 if __name__ == "__main__":

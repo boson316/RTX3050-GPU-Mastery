@@ -19,14 +19,13 @@ import torch.nn as nn
 from benchmarks.bench_utils import (
     BENCHMARKS_DIR,
     PLOTS_DIR,
-    run_bench,
-    sample_gpu_utilization,
-    compute_metrics,
-    save_csv,
-    print_benchmark_table,
+    ensure_plots_dir,
+    measure,
     plot_bar_chart,
     plot_grouped_bars,
-    ensure_plots_dir,
+    print_benchmark_table,
+    sample_gpu_utilization,
+    save_csv,
 )
 
 WARMUP = 10
@@ -49,68 +48,48 @@ def conv_flops(B: int, C_in: int, H: int, W: int, C_out: int, K: int = 3) -> flo
     return 2 * B * C_out * out_h * out_w * C_in * K * K
 
 
-def run_pytorch(B: int, C_in: int, H: int, W: int, C_out: int) -> tuple[float, float, float]:
-    x = torch.randn(B, C_in, H, W, device="cuda", dtype=DTYPE)
-    conv = nn.Conv2d(C_in, C_out, 3, padding=0).to("cuda", dtype=DTYPE)
-    w, b = conv.weight, conv.bias
-    bytes_r = _bytes(x, w, b)
-    out_h, out_w = H - 2, W - 2
-    bytes_w = B * C_out * out_h * out_w * 2
-
-    def fn():
-        torch.nn.functional.conv2d(x, w, b, padding=0)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    flops = conv_flops(B, C_in, H, W, C_out)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops", 0.0), m["memory_bandwidth_gbs"]
+def _measure(name, fn, x, w, b, elem_bytes, B, C_in, H, W, C_out):
+    ref = torch.nn.functional.conv2d(x.float(), w.float(), b.float())
+    out_elems = B * C_out * (H - 2) * (W - 2)
+    m = measure(name, fn, ref, _bytes(x, w, b), out_elems * elem_bytes, conv_flops(B, C_in, H, W, C_out),
+                atol=5e-2, rtol=1e-2, warmup=WARMUP, repeat=REPEAT)
+    if m is None:
+        return None, None, None
+    return m["latency_ms"], m.get("gflops"), m["memory_bandwidth_gbs"]
 
 
-def run_triton(B: int, C_in: int, H: int, W: int, C_out: int) -> tuple[float | None, float | None, float | None]:
+def _inputs(B, C_in, H, W, C_out, dtype):
+    x = torch.randn(B, C_in, H, W, device="cuda", dtype=dtype)
+    w = torch.randn(C_out, C_in, 3, 3, device="cuda", dtype=dtype) / 3
+    b = torch.randn(C_out, device="cuda", dtype=dtype) * 0.1
+    return x, w, b
+
+
+def run_pytorch(B: int, C_in: int, H: int, W: int, C_out: int):
+    x, w, b = _inputs(B, C_in, H, W, C_out, DTYPE)
+    return _measure("cuDNN", lambda: torch.nn.functional.conv2d(x, w, b), x, w, b, 2, B, C_in, H, W, C_out)
+
+
+def run_triton(B: int, C_in: int, H: int, W: int, C_out: int):
     try:
         from triton_kernels.conv import conv2d_triton
     except Exception:
         return None, None, None
-    x = torch.randn(B, C_in, H, W, device="cuda", dtype=DTYPE)
-    w = torch.randn(C_out, C_in, 3, 3, device="cuda", dtype=DTYPE)
-    b = torch.zeros(C_out, device="cuda", dtype=DTYPE)
-    bytes_r = _bytes(x, w, b)
-    out_h, out_w = H - 2, W - 2
-    bytes_w = B * C_out * out_h * out_w * 2
-
-    def fn():
-        conv2d_triton(x, w, b, use_autotune=True)
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    flops = conv_flops(B, C_in, H, W, C_out)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops"), m["memory_bandwidth_gbs"]
+    x, w, b = _inputs(B, C_in, H, W, C_out, DTYPE)
+    return _measure("Triton conv", lambda: conv2d_triton(x, w, b, use_autotune=True), x, w, b, 2, B, C_in, H, W, C_out)
 
 
-def run_cuda(B: int, C_in: int, H: int, W: int, C_out: int) -> tuple[float | None, float | None, float | None]:
-    """CUDA extension (custom_conv) only supports float32; we benchmark in FP32."""
+def run_cuda(B: int, C_in: int, H: int, W: int, C_out: int):
+    """CUDA extension (custom_conv): FP32 only, built for C_in=1, C_out=32."""
     try:
         import custom_conv
     except ImportError:
         return None, None, None
     if C_in != 1 or C_out != 32:
-        # extension is built for C_in=1, C_out=32
         return None, None, None
-    # custom_conv2d is not implemented for Half — use float32
-    x = torch.randn(B, C_in, H, W, device="cuda", dtype=torch.float32)
-    conv = nn.Conv2d(C_in, C_out, 3, padding=0).to("cuda", dtype=torch.float32)
-    w, b = conv.weight, conv.bias
-    bytes_r = _bytes(x, w, b)
-    out_h, out_w = H - 2, W - 2
-    bytes_w = B * C_out * out_h * out_w * 4  # float32
-
-    def fn():
-        custom_conv.custom_conv2d(x, w, b)[0]
-
-    lat = run_bench(fn, warmup=WARMUP, repeat=REPEAT)
-    flops = conv_flops(B, C_in, H, W, C_out)
-    m = compute_metrics(lat, bytes_r, bytes_w, flops)
-    return lat, m.get("gflops"), m["memory_bandwidth_gbs"]
+    x, w, b = _inputs(B, C_in, H, W, C_out, torch.float32)
+    return _measure("CUDA ext conv (FP32)", lambda: custom_conv.custom_conv2d(x, w, b)[0], x, w, b, 4,
+                    B, C_in, H, W, C_out)
 
 
 def main():
@@ -178,7 +157,7 @@ def main():
 
     fieldnames = ["implementation", "config", "latency_ms", "gflops", "memory_bandwidth_gbs", "gpu_utilization_pct"]
     save_csv(rows, BENCHMARKS_DIR / "benchmark_conv_results.csv", fieldnames=fieldnames)
-    print(f"CSV saved: benchmarks/benchmark_conv_results.csv")
+    print("CSV saved: benchmarks/benchmark_conv_results.csv")
 
     print_benchmark_table(rows, title="Conv2D benchmark", columns=fieldnames)
 

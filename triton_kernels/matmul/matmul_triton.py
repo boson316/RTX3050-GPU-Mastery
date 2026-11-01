@@ -1,269 +1,137 @@
 """
-Triton matrix multiplication: C = A @ B.
+Triton matrix multiplication: C = A @ B (FP16 / BF16 inputs, FP32 accumulation).
 
-Provides:
-- Baseline: simple 2D tiling, one block per output tile.
-- Optimized: larger tiles, split-K for large K, FP16/BF16 with float32 accumulation.
-- Autotuning over BLOCK_M, BLOCK_N, BLOCK_K and (optional) SPLIT_K.
-- Benchmark vs PyTorch (torch.matmul / cuBLAS).
+One kernel, three entry points:
+- matmul_baseline:  32x32x16 tiles, row-major program order (the "textbook" version).
+- matmul_optimized: 64x64x32 tiles + grouped (swizzled) program order for L2 reuse.
+- matmul_triton:    autotuned over BLOCK_M/N/K, GROUP_M, num_warps and num_stages
+                    (software pipelining depth for the async-copy K loop on Ampere).
+
+Grouped ordering (GROUP_M):
+  With plain row-major ordering, consecutive programs walk along one row of C tiles,
+  so each program re-reads a *different* B column panel and the B panels fall out of
+  L2 before the next row of tiles reuses them. Launching programs in groups of
+  GROUP_M rows makes GROUP_M consecutive programs share the same B panel, and the
+  A panels of the group stay hot in L2 as well. For 2048^3 FP16 on a 2 MB L2 this
+  is the difference between L2-resident and DRAM-bound panels.
+
+Boundary handling:
+  M, N and K need not be multiples of the tile size; all three dimensions are
+  masked (an earlier version masked only M and N and read past the end of A/B
+  whenever K % BLOCK_K != 0 - see tests/test_triton_kernels.py::test_matmul_odd_shapes).
 
 Memory access patterns:
-- A is (M, K): we load BLOCK_M x BLOCK_K tiles along rows of A; consecutive threads
-  read consecutive columns (K-dim) -> coalesced along K.
-- B is (K, N): we load BLOCK_K x BLOCK_N tiles; consecutive threads read consecutive
-  rows (K-dim) -> coalesced along K. Good L2 reuse when BLOCK_K is in L1/SRAM.
-- C is (M, N): we write BLOCK_M x BLOCK_N; coalesced along N.
+- A (M, K) row-major: BLOCK_M x BLOCK_K tiles, contiguous along K -> coalesced.
+- B (K, N) row-major: BLOCK_K x BLOCK_N tiles, contiguous along N -> coalesced.
+- C (M, N): BLOCK_M x BLOCK_N tile written once, contiguous along N.
 
 Register usage:
-- Each thread participates in a BLOCK_M x BLOCK_N output tile. With tl.dot, Triton
-  maps to tensor cores / vectorized ops; register pressure scales with BLOCK_M*BLOCK_N
-  (accumulator) + BLOCK_M*BLOCK_K + BLOCK_K*BLOCK_N (loaded tiles). Autotune keeps
-  these within register limits.
+  The FP32 accumulator is BLOCK_M*BLOCK_N / (32*num_warps) registers per thread
+  (128x128 with 8 warps -> 64 regs), plus the A/B fragments; autotuning keeps this
+  below the 255-register limit without spilling.
 """
 from __future__ import annotations
 
 import torch
-import triton
 import triton.language as tl
 
-# -----------------------------------------------------------------------------
-# Baseline kernel: simple tiling, no split-K
-# Block tiling: each program computes one output tile C[pid_m*BLOCK_M : (pid_m+1)*BLOCK_M,
-#                pid_n*BLOCK_N : (pid_n+1)*BLOCK_N] by iterating over K in steps of BLOCK_K.
-# -----------------------------------------------------------------------------
+import triton
 
 
 @triton.jit
-def _matmul_baseline_kernel(
-    A_ptr,
-    B_ptr,
-    C_ptr,
-    M,
-    N,
-    K,
-    stride_am,
-    stride_ak,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
+def _matmul_kernel(
+    A_ptr, B_ptr, C_ptr,
+    M, N, K,
+    stride_am, stride_ak,
+    stride_bk, stride_bn,
+    stride_cm, stride_cn,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
-    ACC_TYPE: tl.constexpr,
+    GROUP_M: tl.constexpr,
 ):
-    # Program ID: 2D grid over (num_tiles_m, num_tiles_n)
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
-    pid_m = pid // num_pid_n
-    pid_n = pid % num_pid_n
 
-    # Offsets for this block: which tile of C we compute
-    offs_am = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_bn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    # Grouped ordering: programs [g*GROUP_M*num_pid_n, (g+1)*GROUP_M*num_pid_n) cover
+    # GROUP_M tile-rows, walking down a column of tiles before moving right.
+    num_pid_in_group = GROUP_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
+
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
 
-    # Pointer bases: A[offs_am, :], B[:, offs_bn]. We advance along K.
-    A_ptrs = A_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    B_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+    a_ptrs = A_ptr + offs_m[:, None].to(tl.int64) * stride_am + offs_k[None, :] * stride_ak
+    b_ptrs = B_ptr + offs_k[:, None].to(tl.int64) * stride_bk + offs_n[None, :] * stride_bn
 
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(0, K, BLOCK_K):
-        a = tl.load(A_ptrs, mask=offs_am[:, None] < M, other=0.0)
-        b = tl.load(B_ptrs, mask=offs_bn[None, :] < N, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=True)
-        A_ptrs += BLOCK_K * stride_ak
-        B_ptrs += BLOCK_K * stride_bk
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    for k0 in range(0, K, BLOCK_K):
+        k_mask = (k0 + offs_k) < K
+        a = tl.load(a_ptrs, mask=(offs_m[:, None] < M) & k_mask[None, :], other=0.0)
+        b = tl.load(b_ptrs, mask=k_mask[:, None] & (offs_n[None, :] < N), other=0.0)
+        acc += tl.dot(a, b)
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bk
 
-    offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    C_ptrs = C_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(C_ptrs, acc.to(C_ptr.dtype.element_ty), mask=mask)
+    c_ptrs = C_ptr + offs_m[:, None].to(tl.int64) * stride_cm + offs_n[None, :] * stride_cn
+    c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+    tl.store(c_ptrs, acc.to(C_ptr.dtype.element_ty), mask=c_mask)
 
 
-# -----------------------------------------------------------------------------
-# Optimized kernel: optional split-K for large K (reduces per-block K and improves
-# occupancy). Same block tiling; we use larger BLOCK_* when not split-K.
-# -----------------------------------------------------------------------------
+_AUTOTUNE_CONFIGS = [
+    triton.Config({"BLOCK_M": bm, "BLOCK_N": bn, "BLOCK_K": bk, "GROUP_M": 8}, num_warps=w, num_stages=s)
+    for bm, bn, bk, w, s in [
+        (128, 128, 32, 8, 3),
+        (128, 64, 32, 4, 4),
+        (64, 128, 32, 4, 4),
+        (128, 128, 64, 8, 2),
+        (64, 64, 64, 4, 3),
+        (64, 64, 32, 4, 4),
+        (128, 256, 32, 8, 3),
+        (256, 128, 32, 8, 3),
+    ]
+]
+
+_matmul_kernel_autotuned = triton.autotune(configs=_AUTOTUNE_CONFIGS, key=["M", "N", "K"])(_matmul_kernel)
 
 
-@triton.jit
-def _matmul_optimized_kernel(
-    A_ptr,
-    B_ptr,
-    C_ptr,
-    M,
-    N,
-    K,
-    stride_am,
-    stride_ak,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    BLOCK_K: tl.constexpr,
-    ACC_TYPE: tl.constexpr,
-    SPLIT_K: tl.constexpr,
-):
-    # Grid: (num_tiles_m * num_tiles_n * SPLIT_K,) when SPLIT_K > 1 we need a
-    # reduction over K; for simplicity this optimized kernel uses SPLIT_K=1.
-    # So one program per (pid_m, pid_n).
-    pid = tl.program_id(0)
-    num_pid_m = tl.cdiv(M, BLOCK_M)
-    num_pid_n = tl.cdiv(N, BLOCK_N)
-    pid_m = pid // num_pid_n
-    pid_n = pid % num_pid_n
-
-    offs_am = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_bn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    offs_k = tl.arange(0, BLOCK_K)
-
-    A_ptrs = A_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    B_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(0, K, BLOCK_K):
-        a = tl.load(A_ptrs, mask=offs_am[:, None] < M, other=0.0)
-        b = tl.load(B_ptrs, mask=offs_bn[None, :] < N, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=True)
-        A_ptrs += BLOCK_K * stride_ak
-        B_ptrs += BLOCK_K * stride_bk
-
-    offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    C_ptrs = C_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(C_ptrs, acc.to(C_ptr.dtype.element_ty), mask=mask)
-
-
-def _get_acc_type(dtype: torch.dtype) -> tl.constexpr:
-    if dtype in (torch.float16, torch.bfloat16):
-        return tl.float32
-    return tl.float32
-
-
-def matmul_baseline(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    BLOCK_M: int = 32,
-    BLOCK_N: int = 32,
-    BLOCK_K: int = 16,
-) -> torch.Tensor:
-    """Baseline matmul C = A @ B. Small tiles for correctness/debug."""
-    assert A.is_cuda and B.is_cuda
+def _prepare(A: torch.Tensor, B: torch.Tensor) -> tuple[torch.Tensor, int, int, int]:
+    assert A.dim() == 2 and B.dim() == 2, "expected 2D matrices"
+    assert A.shape[1] == B.shape[0], f"shape mismatch: {tuple(A.shape)} @ {tuple(B.shape)}"
+    assert A.device == B.device and A.dtype == B.dtype
     M, K = A.shape
-    _, N = B.shape
+    N = B.shape[1]
     C = torch.empty((M, N), device=A.device, dtype=A.dtype)
-    ACC_TYPE = _get_acc_type(A.dtype)
+    return C, M, N, K
 
+
+def _launch_fixed(A, B, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_M):
+    C, M, N, K = _prepare(A, B)
     grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
-    _matmul_baseline_kernel[grid](
-        A, B, C,
-        M=M, N=N, K=K,
-        stride_am=A.stride(0), stride_ak=A.stride(1),
-        stride_bk=B.stride(0), stride_bn=B.stride(1),
-        stride_cm=C.stride(0), stride_cn=C.stride(1),
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
-        ACC_TYPE=ACC_TYPE,
+    _matmul_kernel[grid](
+        A, B, C, M, N, K,
+        A.stride(0), A.stride(1), B.stride(0), B.stride(1), C.stride(0), C.stride(1),
+        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K, GROUP_M=GROUP_M,
     )
     return C
 
 
-def matmul_optimized(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    BLOCK_M: int = 64,
-    BLOCK_N: int = 64,
-    BLOCK_K: int = 32,
-) -> torch.Tensor:
-    """Optimized matmul with larger tiles; use autotuned version in production."""
-    assert A.is_cuda and B.is_cuda
-    M, K = A.shape
-    _, N = B.shape
-    C = torch.empty((M, N), device=A.device, dtype=A.dtype)
-    ACC_TYPE = _get_acc_type(A.dtype)
-
-    grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N),)
-    _matmul_optimized_kernel[grid](
-        A, B, C,
-        M=M, N=N, K=K,
-        stride_am=A.stride(0), stride_ak=A.stride(1),
-        stride_bk=B.stride(0), stride_bn=B.stride(1),
-        stride_cm=C.stride(0), stride_cn=C.stride(1),
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N, BLOCK_K=BLOCK_K,
-        ACC_TYPE=ACC_TYPE,
-        SPLIT_K=1,
-    )
-    return C
+def matmul_baseline(A: torch.Tensor, B: torch.Tensor, BLOCK_M: int = 32, BLOCK_N: int = 32,
+                    BLOCK_K: int = 16) -> torch.Tensor:
+    """Small tiles, row-major program order (GROUP_M=1). Reference point for the optimizations."""
+    return _launch_fixed(A, B, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_M=1)
 
 
-# -----------------------------------------------------------------------------
-# Autotuned wrapper: picks best BLOCK_M, BLOCK_N, BLOCK_K for given M, N, K.
-# -----------------------------------------------------------------------------
-
-
-@triton.autotune(
-    configs=[
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=4),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=4),
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_warps=8),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4),
-        triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_warps=4),
-        triton.Config({"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_warps=8),
-        triton.Config({"BLOCK_M": 64, "BLOCK_N": 256, "BLOCK_K": 32}, num_warps=8),
-    ],
-    key=["M", "N", "K"],
-)
-@triton.jit
-def _matmul_autotuned_kernel(
-    A_ptr,
-    B_ptr,
-    C_ptr,
-    M,
-    N,
-    K,
-    stride_am,
-    stride_ak,
-    stride_bk,
-    stride_bn,
-    stride_cm,
-    stride_cn,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    BLOCK_K: tl.constexpr,
-    ACC_TYPE: tl.constexpr,
-):
-    pid = tl.program_id(0)
-    num_pid_m = tl.cdiv(M, BLOCK_M)
-    num_pid_n = tl.cdiv(N, BLOCK_N)
-    pid_m = pid // num_pid_n
-    pid_n = pid % num_pid_n
-
-    offs_am = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_bn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    offs_k = tl.arange(0, BLOCK_K)
-
-    A_ptrs = A_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    B_ptrs = B_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(0, K, BLOCK_K):
-        a = tl.load(A_ptrs, mask=offs_am[:, None] < M, other=0.0)
-        b = tl.load(B_ptrs, mask=offs_bn[None, :] < N, other=0.0)
-        acc += tl.dot(a, b, allow_tf32=True)
-        A_ptrs += BLOCK_K * stride_ak
-        B_ptrs += BLOCK_K * stride_bk
-
-    offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    C_ptrs = C_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(C_ptrs, acc.to(C_ptr.dtype.element_ty), mask=mask)
+def matmul_optimized(A: torch.Tensor, B: torch.Tensor, BLOCK_M: int = 64, BLOCK_N: int = 64,
+                     BLOCK_K: int = 32) -> torch.Tensor:
+    """Larger tiles + grouped program order for L2 reuse."""
+    return _launch_fixed(A, B, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_M=8)
 
 
 def matmul_triton(
@@ -274,43 +142,16 @@ def matmul_triton(
     BLOCK_K: int | None = None,
     use_autotune: bool = True,
 ) -> torch.Tensor:
-    """
-    Matrix multiply C = A @ B. Supports FP16 and BF16 (accumulation in FP32).
-    If use_autotune=True (default), ignores BLOCK_* and uses autotuned config.
-    """
-    assert A.is_cuda and B.is_cuda
-    M, K = A.shape
-    _, N = B.shape
-    C = torch.empty((M, N), device=A.device, dtype=A.dtype)
-    ACC_TYPE = _get_acc_type(A.dtype)
-
+    """C = A @ B. FP16/BF16 (FP32 accumulate). Autotuned unless explicit block sizes are given."""
     if use_autotune and BLOCK_M is None and BLOCK_N is None and BLOCK_K is None:
-        grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * triton.cdiv(N, meta["BLOCK_N"]),)
-        _matmul_autotuned_kernel[grid](
-            A, B, C,
-            M=M, N=N, K=K,
-            stride_am=A.stride(0), stride_ak=A.stride(1),
-            stride_bk=B.stride(0), stride_bn=B.stride(1),
-            stride_cm=C.stride(0), stride_cn=C.stride(1),
-            ACC_TYPE=ACC_TYPE,
+        C, M, N, K = _prepare(A, B)
+        grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * triton.cdiv(N, meta["BLOCK_N"]),)  # noqa: E731
+        _matmul_kernel_autotuned[grid](
+            A, B, C, M, N, K,
+            A.stride(0), A.stride(1), B.stride(0), B.stride(1), C.stride(0), C.stride(1),
         )
         return C
-
-    bm = BLOCK_M if BLOCK_M is not None else 64
-    bn = BLOCK_N if BLOCK_N is not None else 64
-    bk = BLOCK_K if BLOCK_K is not None else 32
-    grid = (triton.cdiv(M, bm) * triton.cdiv(N, bn),)
-    _matmul_optimized_kernel[grid](
-        A, B, C,
-        M=M, N=N, K=K,
-        stride_am=A.stride(0), stride_ak=A.stride(1),
-        stride_bk=B.stride(0), stride_bn=B.stride(1),
-        stride_cm=C.stride(0), stride_cn=C.stride(1),
-        BLOCK_M=bm, BLOCK_N=bn, BLOCK_K=bk,
-        ACC_TYPE=ACC_TYPE,
-        SPLIT_K=1,
-    )
-    return C
+    return _launch_fixed(A, B, BLOCK_M or 64, BLOCK_N or 64, BLOCK_K or 32, GROUP_M=8)
 
 
 # -----------------------------------------------------------------------------
