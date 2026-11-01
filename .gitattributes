@@ -1,0 +1,4 @@
+# Windows batch files need CRLF; shell scripts need LF regardless of core.autocrlf.
+*.bat text eol=crlf
+*.sh  text eol=lf
+*.png binary
