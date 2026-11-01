@@ -21,8 +21,8 @@ IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 def _setup_mpl():
     import matplotlib
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
     return plt, mpatches
 
 
@@ -88,7 +88,7 @@ def draw_cuda_thread_hierarchy():
                 wy = 7.4 - w * 0.7
                 warp = mpatches.Rectangle((wx, wy), 2.2, 0.55, facecolor="#7eb8da", edgecolor="#0d3d6b")
                 ax.add_patch(warp)
-                ax.text(wx + 1.1, wy + 0.27, f"Warp (32 threads)", ha="center", fontsize=8)
+                ax.text(wx + 1.1, wy + 0.27, "Warp (32 threads)", ha="center", fontsize=8)
             ax.text(bx + 1.25, 6.6, "… more warps", ha="center", fontsize=8, style="italic")
         else:
             ax.text(bx + 1.25, 7.5, "Block\n(warps)", ha="center", fontsize=9)
@@ -181,7 +181,7 @@ def draw_flashattention_tiling():
 
 def main():
     try:
-        import matplotlib
+        import matplotlib  # noqa: F401  (availability check)
     except ImportError:
         print("matplotlib required: pip install matplotlib")
         sys.exit(1)

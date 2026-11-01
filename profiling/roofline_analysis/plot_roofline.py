@@ -168,7 +168,7 @@ def plot_roofline(
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        raise SystemExit("matplotlib required: pip install matplotlib")
+        raise SystemExit("matplotlib required: pip install matplotlib") from None
 
     points, curve = build_roofline_data(prefix, B=B, S=S, H=H)
     out_path = out_path or NSIGHT_REPORTS / "roofline_model.png"

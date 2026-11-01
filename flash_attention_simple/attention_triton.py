@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import torch
 
+
 # Lazy import to avoid requiring triton when not used
 def attention_triton(
     q: torch.Tensor,

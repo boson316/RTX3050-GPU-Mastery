@@ -8,14 +8,15 @@ import sys
 import time
 
 try:
+    import custom_conv
     import torch
     import torch.nn as nn
-    import custom_conv
-except ImportError as e:
+except ImportError:
     print("請先編譯 extension: pip install --no-build-isolation .", file=sys.stderr)
     sys.exit(1)
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 

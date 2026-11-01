@@ -19,7 +19,7 @@ import argparse
 import csv
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Repo root: parent of tools/
@@ -136,7 +136,7 @@ def write_report(
 ) -> None:
     """Write benchmarks/performance_report.md."""
     BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "# Performance Report",
         "",
@@ -201,7 +201,7 @@ def write_report(
     if chart_list:
         lines.append("Charts are saved in `benchmarks/plots/` and `benchmarks/*.png`.")
         lines.append("")
-        for label, path in chart_list:
+        for label, _path in chart_list:
             lines.append(f"- `{label}`")
         lines.append("")
         lines.append("Example embedding (paths relative to this report in `benchmarks/`):")
@@ -244,7 +244,7 @@ def main() -> None:
             ok, out = run_cmd([sys.executable, str(path)], REPO_ROOT)
             ran_benchmarks = ran_benchmarks or ok
             if not ok:
-                print(f"  Warning: exit non-zero. Last lines:\n  " + "\n  ".join(out.strip().splitlines()[-5:]))
+                print("  Warning: exit non-zero. Last lines:\n  " + "\n  ".join(out.strip().splitlines()[-5:]))
             else:
                 print("  OK")
         print("Benchmarks done.")

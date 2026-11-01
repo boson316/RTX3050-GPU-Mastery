@@ -42,9 +42,9 @@ def main():
         print("CUDA not available. Skip benchmark.")
         return
 
-    from flash_attention_simple.reference_pytorch import attention_pytorch
-    from flash_attention_simple.attention_triton import attention_triton
     from flash_attention_simple.attention_cuda import attention_cuda
+    from flash_attention_simple.attention_triton import attention_triton
+    from flash_attention_simple.reference_pytorch import attention_pytorch
 
     print("=" * 70)
     print("FlashAttention benchmark: PyTorch vs CUDA vs Triton")

@@ -5,9 +5,10 @@
 """
 
 import matplotlib
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 
 # 流程節點（文字縮短，避免超出框）
 nodes = [

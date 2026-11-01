@@ -5,13 +5,15 @@ MNIST Custom CUDA Conv2d + Benchmark vs torch.nn.Conv2d
 """
 import sys
 from pathlib import Path
+
 _root = Path(__file__).resolve().parent.parent
 if (_root / "triton").is_dir():
     sys.path.insert(0, str(_root / "triton"))
 
+import time
+
 import torch
 import torch.nn as nn
-import time
 
 try:
     import custom_conv

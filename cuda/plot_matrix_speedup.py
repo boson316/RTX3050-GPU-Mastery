@@ -5,9 +5,9 @@ Matrix Multiply Speedup 圖（RTX 3050）
 """
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 
 # 你的實際數據（N=1024）
 N = 1024

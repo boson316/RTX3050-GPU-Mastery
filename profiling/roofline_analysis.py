@@ -288,11 +288,11 @@ def transformer_flops_bytes(B=8, S=256, H=768):
 
 def run_roofline_transformer():
     from benchmarks.transformer_reference import (
-        fused_qkv_pytorch,
-        softmax_pytorch,
-        layernorm_pytorch,
-        gelu_pytorch,
         fused_mlp_pytorch,
+        fused_qkv_pytorch,
+        gelu_pytorch,
+        layernorm_pytorch,
+        softmax_pytorch,
     )
     B, S, H = 8, 256, 768
     M = B * S
@@ -341,11 +341,11 @@ def run_roofline_transformer():
 
     # Triton
     try:
+        from triton_kernels.gelu import gelu_triton
+        from triton_kernels.layernorm import layernorm_triton
+        from triton_kernels.mlp import fused_mlp_triton
         from triton_kernels.qkv import fused_qkv_triton
         from triton_kernels.softmax import softmax_triton
-        from triton_kernels.layernorm import layernorm_triton
-        from triton_kernels.gelu import gelu_triton
-        from triton_kernels.mlp import fused_mlp_triton
     except Exception:
         return results
 
@@ -442,7 +442,6 @@ def plot_roofline(all_results):
     for r in memory_bound:
         ai = max(r["arithmetic_intensity"], 0.01)
         perf = r.get("achieved_gflops") or 0.01
-        label = f"{r['kernel']} {r['config']} ({r['implementation']})"
         ax.scatter([ai], [perf], c="C0", s=60, marker="o", alpha=0.8, edgecolors="black", linewidths=0.5)
 
     for r in compute_bound:
