@@ -31,7 +31,7 @@ set ARCH=sm_86
 if defined CUDA_ARCH set ARCH=%CUDA_ARCH%
 
 echo Building flash_attention_cuda_standalone.exe ...
-nvcc -arch=%ARCH% -o flash_attention_cuda_standalone flash_attention_cuda_standalone.cu -O3 -allow-unsupported-compiler
+nvcc -arch=%ARCH% -std=c++17 -O3 --use_fast_math -o flash_attention_cuda_standalone flash_attention_cuda_standalone.cu -allow-unsupported-compiler
 if errorlevel 1 (
   echo Build failed.
   exit /b 1

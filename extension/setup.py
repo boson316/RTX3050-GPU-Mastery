@@ -1,5 +1,5 @@
 """
-PyTorch CUDA Extension: custom 3x3 conv2d (FP16, 16x16 tile, sm_86).
+PyTorch CUDA Extension: custom 3x3 conv2d, C_in=1, C_out=32 (FP32/FP16 storage, FP32 accumulate, sm_86).
 Build: pip install --no-build-isolation .  (requires CUDA + C++ compiler)
 """
 from setuptools import setup
@@ -15,7 +15,7 @@ setup(
                 "nvcc": [
                     "-allow-unsupported-compiler",
                     "-gencode=arch=compute_86,code=sm_86",
-                    "--use_fast_math",
+                    "-O3",
                 ],
             },
         ),

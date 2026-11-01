@@ -29,7 +29,8 @@ def _load_cuda_extension():
         _cuda_attention = load(
             name="flash_attention_cuda",
             sources=[str(cu_path), str(cpp_path)],
-            extra_cuda_cflags=["-O3"],
+            extra_cuda_cflags=["-O3", "--use_fast_math"],
+            extra_include_paths=[str(folder)],
             build_directory=str(build_dir),
             with_cuda=True,
         )
@@ -45,11 +46,14 @@ def attention_cuda(
     k: torch.Tensor,
     v: torch.Tensor,
     scale: float | None = None,
+    causal: bool = False,
 ) -> torch.Tensor | None:
     """
-    attention(Q, K, V) = softmax(Q K^T / sqrt(d)) V. CUDA tiled kernel.
+    attention(Q, K, V) = softmax(Q K^T * scale) V with the tiled online-softmax kernel in
+    flash_attention_kernel.cuh (one query row per thread, K/V tiles in shared memory).
 
-    Requires JIT build (first call may compile). Returns None if build fails.
+    Requires JIT build (first call may compile). Returns None if the build fails or the inputs
+    are unsupported; launch errors raise RuntimeError instead of returning garbage.
     q, k, v: (B, H, S, D) float32 on CUDA. D must be <= 64.
     """
     if not q.is_cuda or q.dtype != torch.float32:
@@ -61,4 +65,4 @@ def attention_cuda(
     if ext is None:
         return None
     scale_val = scale if scale is not None else (1.0 / (D ** 0.5))
-    return ext.forward(q, k, v, scale_val)
+    return ext.forward(q, k, v, scale_val, causal)
