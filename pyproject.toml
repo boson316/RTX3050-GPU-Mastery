@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rtx3050-gpu-mastery"
-version = "0.1.0"
+version = "2.0.0"
 description = "GPU kernel optimization playground — CUDA, Triton, PyTorch extensions, benchmarks, profiling (RTX 3050 / ML infrastructure showcase)"
 readme = "README.md"
 license = { text = "MIT" }

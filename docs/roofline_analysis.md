@@ -49,7 +49,7 @@ Roofline plotting does not change kernel launches. The script:
 - **Below the roofline:** Kernel is not reaching the theoretical ceiling; possible causes: low occupancy, warp divergence, poor coalescing, or wrong FLOP/byte count.
 - **On the slope (memory-bound):** Optimize memory: coalescing, tiling, recomputation to reduce bytes.
 - **On the flat (compute-bound):** Optimize compute: occupancy, tensor cores, better block size.
-- **Ridge point (RTX 3050 FP16):** ~9 TFLOPS / 192 GB/s ≈ **47 FLOP/byte**. Kernels with AI &lt; 47 are memory-bound; AI &gt; 47 compute-bound.
+- **Ridge point (RTX 3050 FP16):** 21.5 TFLOPS / 132 GB/s ≈ **163 FLOP/byte** (`python benchmarks/gpu_specs.py`). Kernels with AI &lt; 163 are memory-bound; AI &gt; 163 compute-bound.
 
 ---
 

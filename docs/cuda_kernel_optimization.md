@@ -93,9 +93,11 @@ mlp_linear_gelu_fp16_kernel<<<grid1, block, 0, stream>>>(x, w1, b1, mid, M, K, N
 
 ## 5. Benchmark results (RTX 3050)
 
+> Figures in this table predate the v2 fixes in `docs/ENGINEERING_LOG.md`. Current measurements are in the README.
+
 | Kernel | Configuration | Result |
 |--------|----------------|--------|
-| Matmul tiled (N=1024) | 16×16, FP32 | ~521× vs a naive single-threaded CPU loop; tiled much faster than naive |
+| Matmul tiled (N=1024) | 16×16, FP32 | tiled much faster than naive |
 | Conv 3×3 FP16 (B=1024) | Extension vs torch | **~1.49×** (0.81 ms vs 1.20 ms) |
 | Conv 3×3 FP16 (B=128) | Extension vs Triton | Extension **~1.27×** vs Triton (0.11 ms vs 0.14 ms) |
 | Transformer QKV (B=8,S=256,H=768) | cuBLAS + bias | Latency in ms range (see benchmark_transformer.py) |

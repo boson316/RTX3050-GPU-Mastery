@@ -45,6 +45,8 @@ def main():
 
     print("2. Conv benchmark chart...")
     _plot_from_csv("benchmark_conv_results.csv", "config", "conv_benchmark.png", "3x3 conv latency (RTX 3050)")
+    _plot_from_csv("benchmark_attention_results.csv", "config", "attention_benchmark.png", "Attention latency (RTX 3050)")
+    _plot_from_csv("benchmark_transformer_results.csv", "kernel", "transformer_benchmark.png", "Transformer kernel latency (FP16, RTX 3050)")
 
     # 3. MNIST acc/loss (optional)
     if not args.skip_mnist:

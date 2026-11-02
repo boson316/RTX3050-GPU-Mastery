@@ -27,9 +27,9 @@ Kernel optimization often means: **move working set from global into shared/regi
 
 | Spec | Value |
 |------|--------|
-| FP16 peak | ~9 TFLOPS |
-| Memory bandwidth | ~192 GB/s |
-| Ridge point (FP16) | ~47 FLOP/byte |
+| FP16 Tensor Core peak (FP32 accumulate) | 21.5 TFLOPS at the 2100 MHz NVML maximum |
+| Memory bandwidth | 132 GB/s |
+| Ridge point (FP16) | 163 FLOP/byte |
 
 ---
 
@@ -115,9 +115,11 @@ See [roofline_analysis.md](roofline_analysis.md) and [memory_hierarchy_diagrams.
 
 ## 7. Benchmark results (RTX 3050)
 
+> Figures in this table predate the v2 fixes in `docs/ENGINEERING_LOG.md`. Current measurements are in the README.
+
 | Kernel | Configuration | Effect of hierarchy |
 |--------|----------------|---------------------|
-| Matmul naive vs tiled (N=1024) | 16×16 tile, shared | ~521× vs a naive single-threaded CPU loop; tiled much faster than naive (less global traffic) |
+| Matmul naive vs tiled (N=1024) | 16×16 tile, shared | tiled much faster than naive (less global traffic) |
 | Conv torch vs extension | 16×16 tile, shared tile_in/tile_w | **~1.5×** over torch (better reuse) |
 | Transformer QKV | cuBLAS matmul + bias kernel | Matmul uses library-optimized access; bias is trivial coalesced write |
 
