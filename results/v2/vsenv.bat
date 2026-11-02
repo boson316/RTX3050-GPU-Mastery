@@ -7,5 +7,6 @@ if not exist "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" (
 )
 set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
 call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" >nul
+set "DISTUTILS_USE_SDK=1"
 cd /d "%~dp0..\.."
 %*

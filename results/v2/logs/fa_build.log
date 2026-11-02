@@ -1,0 +1,11 @@
+Building flash_attention_cuda_standalone.exe ...
+flash_attention_cuda_standalone.cu
+tmpxft_00006f68_00000000-10_flash_attention_cuda_standalone.cudafe1.cpp
+   正在建立程式庫 flash_attention_cuda_standalone.lib 和物件 flash_attention_cuda_standalone.exp
+
+Build OK. Run CUDA benchmark (sequence lengths 128, 256, 512, 1024):
+  flash_attention_cuda_standalone.exe 128
+  flash_attention_cuda_standalone.exe 256
+  flash_attention_cuda_standalone.exe 512
+  flash_attention_cuda_standalone.exe 1024
+Each prints CUDA_MS=... to compare with PyTorch/Triton.

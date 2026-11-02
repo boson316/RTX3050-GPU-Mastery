@@ -1,0 +1,15 @@
+| Benchmark | Verify | Naive (ms) | Optimized (ms) | Speedup | Throughput | Notes |
+|---|---|---|---|---|---|---|
+| L1 vector add (float vs float4) | PASS | 0.1096 | 0.1075 | 1.02x | 114.8 -> 117.1 GBPS |  |
+| L1 reduction (atomic vs smem tree) | PASS | 3.3340 | 0.1075 | 31.01x | - -> 39.0 GBPS |  |
+| L1 naive SGEMM 1024^3 | PASS | 6.9212 | - | - | 310.3 -> - GFLOPS |  |
+| L2 tiled SGEMM 1024^3 | PASS | 4.4511 | 3.3022 | 1.35x | 482.5 -> 650.3 GFLOPS |  |
+| L2 coalescing (strided vs coalesced copy) | PASS | 19.4939 | 1.1090 | 17.58x | 6.9 -> 121.0 GBPS |  |
+| L2 bank conflicts (transpose [32][32] vs [32][33]) | PASS | 1.1192 | 1.1244 | 1.00x | 119.9 -> 119.4 GBPS |  |
+| L3 reduction (smem tree vs warp shuffle) | PASS | 0.8960 | 0.5356 | 1.67x | 74.9 -> 125.3 GBPS |  |
+| L3 fusion (add;relu vs add+relu) | PASS | 2.7187 | 1.6220 | 1.68x | - -> - GBPS |  |
+| L3 grid-stride / persistent | PASS | 1.6302 | 1.6732 | 0.97x | 123.5 -> 120.3 GBPS |  |
+| L4 FP16 GEMM 1024^3 (CUDA cores vs WMMA tiled) | PASS | 6.9477 | 0.2957 | 23.50x | - -> 7261.3 GFLOPS | 76.5% of cuBLAS |
+| L4 WMMA 16x16x16 example | PASS | - | - | - |  |  |
+
+Written to C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\cuda_roadmap\results.md
