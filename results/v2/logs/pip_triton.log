@@ -1,0 +1,6 @@
+Collecting triton-windows
+  Downloading triton_windows-3.9.0.post30-cp311-cp311-win_amd64.whl.metadata (1.1 kB)
+Downloading triton_windows-3.9.0.post30-cp311-cp311-win_amd64.whl (73.2 MB)
+   ---------------------------------------- 73.2/73.2 MB 17.7 MB/s  0:00:04
+Installing collected packages: triton-windows
+Successfully installed triton-windows-3.9.0.post30

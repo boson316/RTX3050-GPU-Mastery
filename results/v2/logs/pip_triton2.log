@@ -1,0 +1,10 @@
+Collecting triton-windows==3.2.0.post21
+  Downloading triton_windows-3.2.0.post21-cp311-cp311-win_amd64.whl.metadata (1.5 kB)
+Downloading triton_windows-3.2.0.post21-cp311-cp311-win_amd64.whl (39.7 MB)
+   ---------------------------------------- 39.7/39.7 MB 2.4 MB/s  0:00:16
+Installing collected packages: triton-windows
+  Attempting uninstall: triton-windows
+    Found existing installation: triton-windows 3.9.0.post30
+    Uninstalling triton-windows-3.9.0.post30:
+      Successfully uninstalled triton-windows-3.9.0.post30
+Successfully installed triton-windows-3.2.0.post21
