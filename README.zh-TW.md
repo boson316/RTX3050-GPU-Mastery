@@ -22,7 +22,7 @@
 | | 內容 | 位置 |
 |---|---|---|
 | ⚡ | **FlashAttention forward**：CUDA 版（每個 thread 負責一個 query row、K/V tile 放在 shared memory、用 `exp2` 做 online softmax、causal 時跳過整塊 tile）和 Triton 版（autotune、`tl.dot` 走 Tensor Core） | [`flash_attention_simple/`](flash_attention_simple)、[`triton_kernels/flash_attention/`](triton_kernels/flash_attention) |
-| 🧮 | **WMMA Tensor Core GEMM**：64×64×32 shared-memory block tile、4 個 warp 各算 2×2 fragment、128-bit 搬移、shared memory padding。1024³ 實測：**中位數為 cuBLAS 的 81%，12 次執行範圍 65.6～109.6%** | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
+| 🧮 | **WMMA Tensor Core GEMM**：64×64×32 shared-memory block tile、4 個 warp 各算 2×2 fragment、128-bit 搬移、shared memory padding。實測：**2048³ 為 cuBLAS 的 79～87%**；1024³ 中位數 81%，但範圍很大（65.6～109.6%） | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
 | 🔗 | **Kernel fusion**：Triton linear 把 bias + GELU 融合進 epilogue（MLP 只需 2 次 launch）、online softmax（讀 2 次而不是 3 次）、Welford LayerNorm、把卷積寫成 9 次向量化 outer product | [`triton_kernels/`](triton_kernels)、[`gpu_kernels/transformer/`](gpu_kernels/transformer) |
 | 🧪 | **CI 上不需要 GPU 的驗證**：Triton interpreter 在 CPU 上執行真正的 kernel；自製的 **CUDA 執行模型模擬器**用 `std::thread` 跑每個 thread、用 `std::barrier` 模擬 `__syncthreads`、用 per-warp 交換區模擬 `__shfl_xor_sync`，直接執行真正的 `__global__` 程式碼。如果有 thread 沒走到 barrier，模擬器會直接死鎖，bug 藏不住 | [`tests/`](tests) |
 | 📈 | **由裝置推導峰值的 Roofline**：SM 數 × 每 clock FLOPs × NVML 查到的時脈。cuBLAS 在 2048³ 達到 NVML 最大時脈 roof 的 67%，以實際維持的時脈計算則是 81% | [`profiling/`](profiling)、[`benchmarks/gpu_specs.py`](benchmarks/gpu_specs.py) |
@@ -160,15 +160,18 @@ Roof 用兩種時脈呈現，因為 2100 MHz 是 NVML 回報的最大值，而�
 - **Triton 的速度有精度代價。** `tl.dot` 處理 FP32 輸入時會用 Tensor Core（TF32），誤差約為 SDPA 和 CUDA 的 1000 倍。這個延遲差距應視為用精度換速度，不是純粹的勝利。
 - **CUDA 是完整 FP32，到 S = 2048 都和 SDPA 相當**，S = 4096 時則比較快。
 
-### WMMA tiled GEMM 與 cuBLAS（1024³、FP16）
+### WMMA tiled GEMM 與 cuBLAS（FP16）
 
 | 指標 | 中位數 | 最小 | 最大 | 次數 |
 |---|---|---|---|---|
-| WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
-| cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
-| WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 1024³ WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
+| 1024³ cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
+| 1024³ WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 2048³ WMMA tiled (GFLOPS) | 11648.3 | 11358.3 | 12122.3 | 6 |
+| 2048³ cuBLAS (GFLOPS) | 14123.6 | 13969.4 | 14364.1 | 6 |
+| 2048³ WMMA % of cuBLAS (%) | 81.9 | 79.1 | 86.5 | 6 |
 
-這些是彼此獨立的行程執行，每次都通過驗證。結果分成兩群，而且是整次執行落在較慢的那一群。**目前還不知道原因**：1 秒預熱並沒有消除它（[`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)）。請不要把這個 benchmark 的單次結果當成答案。
+這些是彼此獨立的行程執行，每次都通過驗證。2048³ 各次相當一致。1024³ 則分成兩群，而且是整次執行落在較慢的那一群。**目前還不知道原因**：1 秒預熱並沒有消除它（[`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)）。請不要把這個 benchmark 的單次結果當成答案。
 
 CUDA roadmap 的 11 個 benchmark 全部通過驗證，結果見 [`cuda_roadmap/results.md`](cuda_roadmap/results.md)。不是每個「最佳化」都有效：bank conflict 的 padding 量到 1.00x，persistent grid-stride kernel 是 0.97x。
 
@@ -195,7 +198,7 @@ git clone https://github.com/boson316/RTX3050-GPU-Mastery.git && cd RTX3050-GPU-
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt "triton==3.2.*" pytest nvidia-ml-py      # Windows：triton-windows==3.2.*
 
-pytest -q                              # kernel 正確性（GPU 上執行，或在 CPU 上用 TRITON_INTERPRET=1）
+pytest -q                              # kernel 正確性（GPU；沒有 GPU 時需要 CPU 版 torch 和最新版 Triton，與 CI 相同）
 tests/cuda_emulation/run_all.sh        # 在 CPU 上驗證 CUDA kernel 邏輯（需要 g++ >= 11）
 python benchmarks/gpu_specs.py         # 這張 GPU 的理論峰值
 scripts/reproduce_all.sh               # 一次跑完：驗證、benchmark、報告、roofline

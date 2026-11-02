@@ -151,13 +151,14 @@ def longseq_table(tr) -> str:
 
 
 def wmma_table(tr) -> str:
-    text = (BASE / "logs" / "wmma_final.log").read_text(encoding="utf-8").splitlines()
-    assert all("VERIFY_WMMA_TILED=PASS" in x and "VERIFY_CUBLAS=PASS" in x for x in text)
     out = []
-    for key, label, unit in (("WMMA_TILED_GFLOPS", "WMMA tiled", "GFLOPS"), ("CUBLAS_GFLOPS", "cuBLAS", "GFLOPS"),
-                             ("WMMA_TILED_PCT_OF_CUBLAS", "WMMA % of cuBLAS", "%")):
-        v = [float(re.search(rf"\b{key}=([\d.]+)", x).group(1)) for x in text]
-        out.append([f"{label} ({unit})", f"{st.median(v):.1f}", f"{min(v):.1f}", f"{max(v):.1f}", str(len(v))])
+    for size, log in (("1024³", "wmma_final.log"), ("2048³", "phase4_wmma_2048_baseline.log")):
+        text = (BASE / "logs" / log).read_text(encoding="utf-8").splitlines()
+        assert all(re.search(r"(VERIFY_)?WMMA_TILED=PASS", x) and re.search(r"(VERIFY_)?CUBLAS=PASS", x) for x in text)
+        for key, label, unit in (("WMMA_TILED_GFLOPS", "WMMA tiled", "GFLOPS"), ("CUBLAS_GFLOPS", "cuBLAS", "GFLOPS"),
+                                 ("WMMA_TILED_PCT_OF_CUBLAS", "WMMA % of cuBLAS", "%")):
+            v = [float(re.search(rf"\b{key}=([\d.]+)", x).group(1)) for x in text]
+            out.append([f"{size} {label} ({unit})", f"{st.median(v):.1f}", f"{min(v):.1f}", f"{max(v):.1f}", str(len(v))])
     return table([tr("Metric"), tr("Median"), tr("Min"), tr("Max"), tr("Runs")], out)
 
 

@@ -24,7 +24,10 @@
 
 using namespace nvcuda;
 
-const int M = 1024, N = 1024, K = 1024;
+#ifndef GEMM_SIZE
+#define GEMM_SIZE 1024
+#endif
+const int M = GEMM_SIZE, N = GEMM_SIZE, K = GEMM_SIZE;
 
 // ---------------------------------------------------------------- 1. CUDA cores
 __global__ void matmul_fp16_cuda_core(const half* A, const half* B, float* C, int m, int n, int k) {

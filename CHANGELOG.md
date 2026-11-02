@@ -21,9 +21,15 @@ First release verified on the real GPU (RTX 3050 6GB Laptop). Measurements are i
 
 ### Measured results
 - cuBLAS at 2048³: 14.36 TFLOPS, which is 67% of the roof at the NVML maximum clock and 81% at the sustained clock of about 1747 MHz.
-- WMMA tiled GEMM at 1024³: median 81% of cuBLAS, range 65.6-109.6% over 12 runs. The cause of the spread is unknown.
+- WMMA tiled GEMM: 79.1-86.5% of cuBLAS at 2048³ (6 runs). At 1024³, median 81%, range 65.6-109.6% over 12 runs; the cause of that spread is unknown.
 - Long-sequence FlashAttention at S = 4096 (FP32): Triton 5.1 ms, CUDA 17.3 ms, SDPA 20.2 ms. Triton's error is about 1000x larger because `tl.dot` uses TF32.
 - 20 SMs confirmed. Peaks are 21.5 TFLOPS (FP16 Tensor Core, FP32 accumulate) and 132 GB/s, replacing assumed values of 15.9 TFLOPS and 168 GB/s.
+
+### Optimization attempts (no kernel changed)
+Each candidate was measured before and after, twice, with verification. None justified a change, so none was kept. Logs are `results/v2/logs/phase4_*`.
+- **WMMA tiled GEMM:** the 60% of cuBLAS target at 2048³ was already met (79.1-86.5%), so `cp.async` and 128x128 tiles were not tried. Added a `GEMM_SIZE` compile option; the default is unchanged.
+- **Triton softmax:** a single-load kernel for rows that fit in one block gained at most about 1% and still trailed PyTorch slightly, so it was reverted. The kernel is bandwidth-bound. The earlier 69 vs 98 GB/s gap does not appear with the corrected timing (110 vs 116 GB/s).
+- **Triton FlashAttention:** no candidate clearly beat the current autotune at S = 2048 and 4096. Larger tiles such as 128x128 exceed shared memory in FP32, and in FP16 they ran but were not faster.
 
 ### Known limits
 - Kernels under about 0.1 ms remain noisy, and Triton has a launch floor of about 0.055 ms.

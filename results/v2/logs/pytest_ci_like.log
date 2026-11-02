@@ -1,0 +1,15 @@
+sss.......sssssssssss........s................ss......................   [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests\test_bench_timing.py:19: needs a CUDA GPU
+SKIPPED [1] tests\test_bench_timing.py:28: needs a CUDA GPU
+SKIPPED [1] tests\test_bench_timing.py:35: needs a CUDA GPU
+SKIPPED [4] tests\test_cuda_extensions.py:42: needs a CUDA GPU
+SKIPPED [1] tests\test_cuda_extensions.py:54: needs a CUDA GPU
+SKIPPED [1] tests\test_cuda_extensions.py:63: needs a CUDA GPU
+SKIPPED [1] tests\test_cuda_extensions.py:71: needs a CUDA GPU
+SKIPPED [1] tests\test_cuda_extensions.py:80: needs a CUDA GPU
+SKIPPED [1] tests\test_cuda_extensions.py:89: needs a CUDA GPU
+SKIPPED [2] tests\test_cuda_extensions.py:100: needs a CUDA GPU
+SKIPPED [1] tests\test_triton_kernels.py:45: needs a CUDA GPU
+SKIPPED [2] tests\test_triton_kernels.py:73: needs a CUDA GPU
+53 passed, 17 skipped in 23.28s

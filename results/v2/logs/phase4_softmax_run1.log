@@ -1,0 +1,13 @@
+       shape             impl  latency_ms
+2048x768              PyTorch      0.0544
+2048x768         Triton multi      0.0560
+2048x768        Triton single      0.0615
+8192x768              PyTorch      0.2072
+8192x768         Triton multi      0.2103
+8192x768        Triton single      0.2081
+32768x768              PyTorch      0.8153
+32768x768         Triton multi      0.8291
+32768x768        Triton single      0.8206
+8192x1024             PyTorch      0.2754
+8192x1024        Triton multi      0.2783
+8192x1024       Triton single      0.2774

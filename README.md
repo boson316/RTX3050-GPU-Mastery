@@ -28,7 +28,7 @@ They are written up in **[docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md)**.
 | | What | Where |
 |---|---|---|
 | ⚡ | **FlashAttention forward** in CUDA (one query row per thread, K/V tiles in shared memory, online softmax with `exp2`, causal tile skipping) and in Triton (autotuned, `tl.dot` on Tensor Cores) | [`flash_attention_simple/`](flash_attention_simple), [`triton_kernels/flash_attention/`](triton_kernels/flash_attention) |
-| 🧮 | **Tensor Core GEMM with WMMA**: a 64×64×32 shared-memory block tile, 4 warps × 2×2 fragments, 128-bit copies, padded shared memory. Measured at 1024³: **median 81 % of cuBLAS, range 65.6–109.6 % over 12 runs** | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
+| 🧮 | **Tensor Core GEMM with WMMA**: a 64×64×32 shared-memory block tile, 4 warps × 2×2 fragments, 128-bit copies, padded shared memory. Measured: **79–87 % of cuBLAS at 2048³**; at 1024³, median 81 % with a wide 65.6–109.6 % range | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
 | 🔗 | **Kernel fusion**: Triton linear layer with fused bias + GELU epilogue (the MLP is 2 launches), online softmax (2 passes instead of 3), Welford LayerNorm, conv as 9 vectorised outer products | [`triton_kernels/`](triton_kernels), [`gpu_kernels/transformer/`](gpu_kernels/transformer) |
 | 🧪 | **GPU-free verification in CI**: the Triton interpreter runs the real kernels on the CPU, and a **CUDA execution-model emulator** (threads + `std::barrier` for `__syncthreads`, per-warp exchange for `__shfl_xor_sync`) runs the real `__global__` code and turns barrier divergence into a deadlock | [`tests/`](tests) |
 | 📈 | **Roofline with device-derived peaks** (SMs × FLOPs/clk × clock from NVML). cuBLAS reaches 67 % of the roof at the NVML maximum clock and 81 % at the clock it actually sustains (2048³) | [`profiling/`](profiling), [`benchmarks/gpu_specs.py`](benchmarks/gpu_specs.py) |
@@ -166,15 +166,18 @@ Precision: the GEMM and Transformer rows are FP16, as are the PyTorch and Triton
 - **Triton's speed has a precision cost.** `tl.dot` on FP32 inputs uses Tensor Cores (TF32), so its error is about 1000x larger than SDPA and CUDA. Treat the latency gap as a speed-for-precision trade rather than a pure win.
 - **CUDA is in full FP32 and matches SDPA up to S = 2048**, and it is faster at S = 4096.
 
-### WMMA tiled GEMM vs cuBLAS (1024³, FP16)
+### WMMA tiled GEMM vs cuBLAS (FP16)
 
 | Metric | Median | Min | Max | Runs |
 |---|---|---|---|---|
-| WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
-| cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
-| WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 1024³ WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
+| 1024³ cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
+| 1024³ WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 2048³ WMMA tiled (GFLOPS) | 11648.3 | 11358.3 | 12122.3 | 6 |
+| 2048³ cuBLAS (GFLOPS) | 14123.6 | 13969.4 | 14364.1 | 6 |
+| 2048³ WMMA % of cuBLAS (%) | 81.9 | 79.1 | 86.5 | 6 |
 
-These are independent process runs, and each one passed verification. The results fall into two groups, and whole runs land in the slower one. **The cause is not known yet**: a 1 s preheat did not remove it ([`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)). Do not read a single run of this benchmark as the answer.
+These are independent process runs, and each one passed verification. At 2048³ the runs are consistent. At 1024³ the results fall into two groups, and whole runs land in the slower one. **The cause is not known yet**: a 1 s preheat did not remove it ([`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)). Do not read a single run of this benchmark as the answer.
 
 All 11 CUDA roadmap benchmarks pass verification; results are in [`cuda_roadmap/results.md`](cuda_roadmap/results.md). Not every "optimization" helps: the bank-conflict padding measured 1.00x and the persistent grid-stride kernel 0.97x.
 
@@ -201,7 +204,7 @@ git clone https://github.com/boson316/RTX3050-GPU-Mastery.git && cd RTX3050-GPU-
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt "triton==3.2.*" pytest nvidia-ml-py      # Windows: triton-windows==3.2.*
 
-pytest -q                              # kernel correctness (GPU, or CPU via TRITON_INTERPRET=1)
+pytest -q                              # kernel correctness (GPU; with no GPU, needs torch CPU and the latest Triton, as in CI)
 tests/cuda_emulation/run_all.sh        # CUDA kernel logic on the CPU (needs g++ >= 11)
 python benchmarks/gpu_specs.py         # theoretical peaks of this GPU
 scripts/reproduce_all.sh               # everything: verify, benchmark, report, roofline

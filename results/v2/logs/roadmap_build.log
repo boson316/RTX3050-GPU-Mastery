@@ -1,35 +1,35 @@
 Building in short path: C:\Users\User\DOCUME~1\code\cursor\RTX305~1\CUDA_R~1
 vector_add_bench.cu
-tmpxft_00001aa4_00000000-10_vector_add_bench.cudafe1.cpp
+tmpxft_000023d4_00000000-10_vector_add_bench.cudafe1.cpp
    正在建立程式庫 level1_basics\vector_add\vector_add_bench.lib 和物件 level1_basics\vector_add\vector_add_bench.exp
 reduction_bench.cu
-tmpxft_00007740_00000000-10_reduction_bench.cudafe1.cpp
+tmpxft_00004870_00000000-10_reduction_bench.cudafe1.cpp
    正在建立程式庫 level1_basics\reduction\reduction_bench.lib 和物件 level1_basics\reduction\reduction_bench.exp
 naive_matmul_bench.cu
-tmpxft_000082a0_00000000-10_naive_matmul_bench.cudafe1.cpp
+tmpxft_00001818_00000000-10_naive_matmul_bench.cudafe1.cpp
    正在建立程式庫 level1_basics\naive_matmul\naive_matmul_bench.lib 和物件 level1_basics\naive_matmul\naive_matmul_bench.exp
 tiled_matmul_bench.cu
-tmpxft_000046e4_00000000-10_tiled_matmul_bench.cudafe1.cpp
+tmpxft_000076d4_00000000-10_tiled_matmul_bench.cudafe1.cpp
    正在建立程式庫 level2_memory\tiled_matmul\tiled_matmul_bench.lib 和物件 level2_memory\tiled_matmul\tiled_matmul_bench.exp
 coalescing_bench.cu
-tmpxft_00008268_00000000-10_coalescing_bench.cudafe1.cpp
+tmpxft_00001d28_00000000-10_coalescing_bench.cudafe1.cpp
    正在建立程式庫 level2_memory\coalescing\coalescing_bench.lib 和物件 level2_memory\coalescing\coalescing_bench.exp
 bank_conflict_bench.cu
-tmpxft_00003b40_00000000-10_bank_conflict_bench.cudafe1.cpp
+tmpxft_00005074_00000000-10_bank_conflict_bench.cudafe1.cpp
    正在建立程式庫 level2_memory\bank_conflict\bank_conflict_bench.lib 和物件 level2_memory\bank_conflict\bank_conflict_bench.exp
 warp_shuffle_bench.cu
-tmpxft_00004df8_00000000-10_warp_shuffle_bench.cudafe1.cpp
+tmpxft_00002ac4_00000000-10_warp_shuffle_bench.cudafe1.cpp
    正在建立程式庫 level3_advanced\warp_shuffle_reduction\warp_shuffle_bench.lib 和物件 level3_advanced\warp_shuffle_reduction\warp_shuffle_bench.exp
 fused_ops_bench.cu
-tmpxft_00005540_00000000-10_fused_ops_bench.cudafe1.cpp
+tmpxft_0000875c_00000000-10_fused_ops_bench.cudafe1.cpp
    正在建立程式庫 level3_advanced\fused_ops\fused_ops_bench.lib 和物件 level3_advanced\fused_ops\fused_ops_bench.exp
 persistent_kernel_bench.cu
-tmpxft_00007d90_00000000-10_persistent_kernel_bench.cudafe1.cpp
+tmpxft_00007288_00000000-10_persistent_kernel_bench.cudafe1.cpp
    正在建立程式庫 level3_advanced\persistent_kernel\persistent_kernel_bench.lib 和物件 level3_advanced\persistent_kernel\persistent_kernel_bench.exp
 fp16_matmul_bench.cu
-tmpxft_00006424_00000000-10_fp16_matmul_bench.cudafe1.cpp
+tmpxft_0000753c_00000000-10_fp16_matmul_bench.cudafe1.cpp
    正在建立程式庫 level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench.lib 和物件 level4_tensor_core\fp16_tensor_core_matmul\fp16_matmul_bench.exp
 wmma_example.cu
-tmpxft_00005d1c_00000000-10_wmma_example.cudafe1.cpp
+tmpxft_00007428_00000000-10_wmma_example.cudafe1.cpp
    正在建立程式庫 level4_tensor_core\wmma_example\wmma_example.lib 和物件 level4_tensor_core\wmma_example\wmma_example.exp
 Done. Run: python run_benchmarks.py

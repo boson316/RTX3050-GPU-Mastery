@@ -56,9 +56,12 @@
 <!-- wmma -->
 | Metric | Median | Min | Max | Runs |
 |---|---|---|---|---|
-| WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
-| cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
-| WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 1024³ WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
+| 1024³ cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
+| 1024³ WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
+| 2048³ WMMA tiled (GFLOPS) | 11648.3 | 11358.3 | 12122.3 | 6 |
+| 2048³ cuBLAS (GFLOPS) | 14123.6 | 13969.4 | 14364.1 | 6 |
+| 2048³ WMMA % of cuBLAS (%) | 81.9 | 79.1 | 86.5 | 6 |
 
 <!-- floor -->
 | Implementation | Launch floor (ms) |
