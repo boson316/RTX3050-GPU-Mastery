@@ -29,11 +29,11 @@ DEFAULT_PREFIX = "transformer"
 from benchmarks.gpu_specs import query as _query_specs  # noqa: E402
 
 # Peaks from the device (SM count x clocks, benchmarks/gpu_specs.py); env vars override;
-# the fallback is the RTX 3050 6GB Laptop (20 SMs @ ~1.55 GHz, 96-bit @ 14 Gbps).
+# the fallback is the RTX 3050 6GB Laptop (20 SMs @ 2100 MHz, 96-bit @ 5501 MHz DDR, read from NVML).
 _specs = _query_specs()
 PEAK_GFLOPS_FP16 = float(os.environ.get("ROOFLINE_PEAK_GFLOPS", 0)) or (
-    (_specs.peak_tflops("fp16_tc_fp32acc") or 0) * 1e3 if _specs else 0) or 15900.0
-PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram_gbs() or 0) if _specs else 0) or 168.0
+    (_specs.peak_tflops("fp16_tc_fp32acc") or 0) * 1e3 if _specs else 0) or 21504.0
+PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram_gbs() or 0) if _specs else 0) or 132.0
 
 
 def theoretical_flops_bytes(B: int, S: int, H: int) -> list[tuple[str, float, float]]:

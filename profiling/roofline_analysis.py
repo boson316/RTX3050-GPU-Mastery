@@ -31,8 +31,8 @@ from benchmarks.gpu_specs import query as _query_specs
 # hard-coded 9 TFLOPS, which put the measured cuBLAS matmul points above the roof.
 _specs = _query_specs()
 PEAK_GFLOPS = float(os.environ.get("ROOFLINE_PEAK_GFLOPS", 0)) or (
-    (_specs.peak_tflops("fp16_tc_fp32acc") or 0) * 1e3 if _specs else 0) or 15900.0
-PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram_gbs() or 0) if _specs else 0) or 168.0
+    (_specs.peak_tflops("fp16_tc_fp32acc") or 0) * 1e3 if _specs else 0) or 21504.0
+PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram_gbs() or 0) if _specs else 0) or 132.0
 RIDGE_AI = PEAK_GFLOPS / PEAK_GBPS  # FLOPs/byte
 
 OUT_DIR = REPO_ROOT / "profiling" / "roofline"
