@@ -111,6 +111,28 @@ What the emulator cannot do: model timing, warps-as-SIMD, memory coalescing or T
 - **Fix:** the install docs now take `torch` and `torchvision` from the CUDA index together and pin Triton to the PyTorch minor version.
 - **Test:** none automated; this is an install-documentation fix. The exact working versions are in `results/v2/requirements-freeze.txt`.
 
+### 15. Benchmarks measured whatever clock the GPU happened to be at
+- **Symptom:** the same kernel varied by up to 16x between runs, with no wrong result to flag it: `torch.softmax` on 2048x768 measured 0.059 ms or 0.993 ms.
+- **Root cause:** `run_bench` warmed up by launch count. For a 0.05 ms kernel the whole measurement lasts about 13 ms, far shorter than the clock ramp, so the number depended on the P-state at the start. Memory runs at 405 MHz at idle.
+- **Found by:** comparing the first two GPU runs, where 20 entries differed by more than 5% (up to 85%), then `results/v2/diag_timing.py`. Log: `results/v2/logs/diag_timing.log`. Spread over 8 samples with idle gaps went from 1575% to 1.6% for PyTorch and from 549% to 0.8% for CUDA.
+- **Fix:** `preheat_gpu()` holds the GPU under load for 1 s before each timing. The earlier runs are kept in `results/v2/csv/pre_fix_run*` and are not used for results.
+- **Not fixed:** the same change in the C++ roadmap harness did not help, so it was reverted. Under identical idle gaps, WMMA as a percentage of cuBLAS was 65.8-105.2% without it and 77.1-169.9% with it (`results/v2/logs/wmma_old_vs_new.log`). Those runs vary per process and the cause is unknown, so that ratio is reported as a median and range over independent runs. Sub-0.1 ms kernels also still vary after the fix, so results use the median of 3 runs.
+- **Test:** `tests/test_bench_timing.py` (`test_run_bench_preheats_before_first_launch`, `test_preheat_lasts_the_requested_time`, `test_latency_is_stable_after_idle`).
+
+### 16. The roofline did not verify anything and timed `torch.randn`
+- **Symptom:** in `roofline_results.csv`, GELU had 0 GFLOPS despite nonzero FLOPs, and its PyTorch latency differed from the benchmark's. CUDA attention and transformer kernels were missing.
+- **Root cause:** `roofline_analysis.py` had its own `run_bench` with `perf_counter` and no correctness check. Failures were dropped by `except Exception: pass`. The PyTorch transformer cases and the Triton softmax and GELU cases called `torch.randn` inside the timed lambda. GELU's FLOPs were excluded from the metric, while the plot recomputed them.
+- **Found by:** reading the code after the GELU row looked wrong.
+- **Fix:** `_verified_bench()` applies `check_close` and then the shared `run_bench`. Transformer inputs are created once and use the same references as `benchmark_transformer.py`. Failures print `[skip]`. CUDA attention and transformer rows were added. Plot labels were reduced to one point per kernel; the data is unchanged.
+- **Test:** `test_roofline_uses_the_shared_harness`, `test_roofline_rejects_a_wrong_kernel_before_timing`, `test_roofline_source_times_no_input_generation_and_drops_no_failures`.
+
+### 17. The dashboard overwrote a chart with hard-coded pre-fix numbers
+- **Symptom:** `tools/performance_dashboard.py` rewrote `benchmarks/matrix_mul_speedup.png` with a "~520x" speedup, the comparison entry #9 had already rejected, and `conv_benchmark.png` disagreed with the benchmark CSV.
+- **Root cause:** `generate_charts.py` ran `cuda/plot_matrix_speedup.py`, which hard-coded `cpu_ms = 2738.25` and the GPU times. Its conv chart and matmul fallback also ran their own timing loops with `perf_counter`, with no correctness check and no preheat.
+- **Found by:** checking why the dashboard changed a tracked PNG on a `--skip-benchmarks` run.
+- **Fix:** both charts are drawn only from the verified benchmark CSVs, and the hard-coded script is deleted.
+- **Test:** `test_charts_do_not_time_or_hard_code_anything`, `test_chart_values_come_from_the_csv`.
+
 ---
 
 ## Lessons that are now enforced in code

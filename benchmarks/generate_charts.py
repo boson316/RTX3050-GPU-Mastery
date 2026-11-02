@@ -2,8 +2,8 @@
 Generate benchmark charts for the repo (RTX 3050–friendly).
 
 Saves PNGs to benchmarks/:
-  - matrix_mul_speedup.png  (from matmul benchmark or cuda plot)
-  - conv_benchmark.png      (torch vs extension vs Triton)
+  - matrix_mul_speedup.png  (from benchmark_matmul_results.csv)
+  - conv_benchmark.png      (from benchmark_conv_results.csv)
   - mnist_acc_loss.png      (optional, from pytorch/mnist_gpu.py)
 
 Run from repo root:
@@ -13,6 +13,7 @@ Run from repo root:
 from __future__ import annotations
 
 import argparse
+import csv
 import subprocess
 import sys
 from pathlib import Path
@@ -37,22 +38,13 @@ def main():
 
     BENCHMARKS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Matrix multiply speedup: use cuda/plot_matrix_speedup.py if present, else plot from matmul_benchmark data
+    # Charts come only from the verified CSVs written by the benchmark scripts: this file must
+    # never time anything itself or carry numbers of its own (docs/ENGINEERING_LOG.md #17).
     print("1. Matrix multiply chart...")
-    cuda_plot = REPO_ROOT / "cuda" / "plot_matrix_speedup.py"
-    if cuda_plot.exists():
-        if run([sys.executable, str(cuda_plot)], REPO_ROOT / "cuda"):
-            src = REPO_ROOT / "cuda" / "matrix_mul_speedup.png"
-            if src.exists():
-                dst = BENCHMARKS_DIR / "matrix_mul_speedup.png"
-                dst.write_bytes(src.read_bytes())
-                print(f"   -> {dst}")
-    else:
-        _plot_matmul_fallback()
+    _plot_from_csv("benchmark_matmul_results.csv", "size", "matrix_mul_speedup.png", "Matmul latency (FP16, RTX 3050)")
 
-    # 2. Conv benchmark chart: run conv_benchmark and plot
     print("2. Conv benchmark chart...")
-    _plot_conv()
+    _plot_from_csv("benchmark_conv_results.csv", "config", "conv_benchmark.png", "3x3 conv latency (RTX 3050)")
 
     # 3. MNIST acc/loss (optional)
     if not args.skip_mnist:
@@ -73,135 +65,40 @@ def main():
     print("Done. Charts in", BENCHMARKS_DIR)
 
 
-def _plot_matmul_fallback():
-    """Plot matmul from live benchmark when cuda/plot_matrix_speedup.py is not used."""
+def _plot_from_csv(csv_name: str, group_key: str, png_name: str, title: str) -> None:
+    """Grouped latency bars from a benchmark CSV. Missing implementations simply have no bar."""
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
-        print("   matplotlib required for fallback plot")
+        print("   matplotlib required")
         return
-    sys.path.insert(0, str(REPO_ROOT))
-    import torch
-    times_torch, times_triton = [], []
-    sizes = [512, 1024, 2048]
-    for N in sizes:
-        M, K = N, N
-        A = torch.randn(M, K, device="cuda", dtype=torch.float16)
-        B = torch.randn(K, N, device="cuda", dtype=torch.float16)
-        for _ in range(10):
-            torch.matmul(A, B)
-        torch.cuda.synchronize()
-        import time
-        t0 = time.perf_counter()
-        for _ in range(50):
-            torch.matmul(A, B)
-        torch.cuda.synchronize()
-        times_torch.append((time.perf_counter() - t0) * 1000 / 50)
-        try:
-            from triton_kernels.matmul import matmul_triton
-            t0 = time.perf_counter()
-            for _ in range(50):
-                matmul_triton(A, B)
-            torch.cuda.synchronize()
-            times_triton.append((time.perf_counter() - t0) * 1000 / 50)
-        except Exception:
-            times_triton.append(None)
+    csv_path = BENCHMARKS_DIR / csv_name
+    if not csv_path.exists():
+        print(f"   ({csv_name} not found: run the benchmark first)")
+        return
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    groups = list(dict.fromkeys(r[group_key] for r in rows))
+    impls = list(dict.fromkeys(r["implementation"] for r in rows))
+    width = 0.8 / len(impls)
     fig, ax = plt.subplots(figsize=(8, 4))
-    x = range(len(sizes))
-    ax.bar([i - 0.2 for i in x], times_torch, 0.4, label="PyTorch", color="C0")
-    if any(t for t in times_triton if t is not None):
-        ax.bar([i + 0.2 for i in x], [t or 0 for t in times_triton], 0.4, label="Triton", color="C1")
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(s) for s in sizes])
-    ax.set_xlabel("Matrix size N×N")
-    ax.set_ylabel("Time (ms)")
-    ax.set_title("Matmul benchmark (RTX 3050)")
+    for i, impl in enumerate(impls):
+        points = [(groups.index(r[group_key]), float(r["latency_ms"])) for r in rows if r["implementation"] == impl]
+        xs = [p[0] + i * width - 0.4 + width / 2 for p in points]
+        bars = ax.bar(xs, [p[1] for p in points], width, label=impl, color=f"C{i}")
+        ax.bar_label(bars, fmt="%.3f", fontsize=7)
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels(groups, fontsize=8)
+    ax.set_yscale("log")
+    ax.set_ylabel("Latency (ms, log scale)")
+    ax.set_title(title)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(BENCHMARKS_DIR / "matrix_mul_speedup.png", dpi=120, bbox_inches="tight")
+    fig.savefig(BENCHMARKS_DIR / png_name, dpi=120, bbox_inches="tight")
     plt.close()
-    print(f"   -> {BENCHMARKS_DIR / 'matrix_mul_speedup.png'}")
-
-
-def _plot_conv():
-    """Run conv benchmark and plot torch vs extension vs Triton."""
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import torch
-        import torch.nn as nn
-    except ImportError:
-        print("   torch/matplotlib required")
-        return
-    sys.path.insert(0, str(REPO_ROOT))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    B, C_in, H, W = 128, 1, 28, 28
-    C_out = 32
-    n = 50
-    torch_conv = nn.Conv2d(C_in, C_out, 3, padding=0).to(device)
-    x = torch.randn(B, C_in, H, W, device=device)
-    labels, times = ["torch.nn.Conv2d"], []
-    for _ in range(5):
-        _ = torch_conv(x)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    import time
-    t0 = time.perf_counter()
-    for _ in range(n):
-        _ = torch_conv(x)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    times.append((time.perf_counter() - t0) * 1000 / n)
-
-    try:
-        import custom_conv
-        w, b = torch_conv.weight, torch_conv.bias
-        for _ in range(5):
-            _ = custom_conv.custom_conv2d(x, w, b)[0]
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        for _ in range(n):
-            _ = custom_conv.custom_conv2d(x, w, b)[0]
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        labels.append("custom_conv2d")
-        times.append((time.perf_counter() - t0) * 1000 / n)
-    except ImportError:
-        pass
-
-    try:
-        from triton_kernels.conv import conv2d_triton_fp16
-        x_h, w_h = x.half(), torch_conv.weight.half()
-        b_h = torch_conv.bias.half()
-        for _ in range(5):
-            _ = conv2d_triton_fp16(x_h, w_h, b_h)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        for _ in range(n):
-            _ = conv2d_triton_fp16(x_h, w_h, b_h)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
-        labels.append("Triton")
-        times.append((time.perf_counter() - t0) * 1000 / n)
-    except Exception:
-        pass
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-    colors = ["#2ecc71", "#3498db", "#9b59b6"][: len(labels)]
-    ax.bar(labels, times, color=colors, edgecolor="gray")
-    ax.set_ylabel("Time (ms) per forward")
-    ax.set_title(f"3×3 Conv2d benchmark (B={B}, {C_in}→{C_out}, RTX 3050)")
-    for i, t in enumerate(times):
-        ax.text(i, t + 0.005, f"{t:.3f}", ha="center", fontsize=9)
-    fig.tight_layout()
-    fig.savefig(BENCHMARKS_DIR / "conv_benchmark.png", dpi=120, bbox_inches="tight")
-    plt.close()
-    print(f"   -> {BENCHMARKS_DIR / 'conv_benchmark.png'}")
+    print(f"   -> {BENCHMARKS_DIR / png_name}")
 
 
 if __name__ == "__main__":

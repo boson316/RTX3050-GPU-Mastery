@@ -18,6 +18,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARKS_DIR = Path(__file__).resolve().parent
 PLOTS_DIR = BENCHMARKS_DIR / "plots"
+PREHEAT_S = 1.0  # seconds of GPU load before timing
 
 # Optional: pynvml for GPU utilization (pip install nvidia-ml-py)
 _pynvml = None
@@ -61,6 +62,16 @@ def device_peaks() -> dict | None:
     return {"tflops_ceiling": tflops, "dram_gbs": bw}
 
 
+def preheat_gpu(seconds: float = PREHEAT_S) -> None:
+    """Hold the GPU under load so SM and memory clocks leave idle before a short timing window."""
+    a = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        for _ in range(20):
+            a @ a
+        torch.cuda.synchronize()
+
+
 def run_bench(
     fn: Callable[[], Any],
     warmup: int = 10,
@@ -75,8 +86,12 @@ def run_bench(
     of the per-round means. CUDA events measure GPU time on the stream, so host-side Python
     overhead between launches is hidden as long as the GPU queue stays busy (as it does in a
     real model). The median makes the number robust to laptop clock-boost / OS jitter.
+    The GPU is preheated first: the timed window can be ~10 ms, far shorter than the clock ramp,
+    and at idle clocks the same kernel measured up to 16x slower (docs/ENGINEERING_LOG.md #15).
     CPU fallback: perf_counter.
     """
+    if sync_cuda and torch.cuda.is_available():
+        preheat_gpu()
     for _ in range(warmup):
         fn()
     if sync_cuda and torch.cuda.is_available():

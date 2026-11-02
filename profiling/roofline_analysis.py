@@ -24,6 +24,7 @@ import os
 
 import torch
 
+from benchmarks.bench_utils import check_close, run_bench
 from benchmarks.gpu_specs import query as _query_specs
 
 # Roof = FP16 Tensor Core with FP32 accumulation (what cuBLAS / tl.dot use for FP16 inputs),
@@ -36,22 +37,13 @@ PEAK_GBPS = float(os.environ.get("ROOFLINE_PEAK_GBPS", 0)) or ((_specs.peak_dram
 RIDGE_AI = PEAK_GFLOPS / PEAK_GBPS  # FLOPs/byte
 
 OUT_DIR = REPO_ROOT / "profiling" / "roofline"
-WARMUP = 5
-REPEAT = 25
 DTYPE = torch.float16
 
 
-def run_bench(fn, warmup=WARMUP, repeat=REPEAT):
-    for _ in range(warmup):
-        fn()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    start = time.perf_counter()
-    for _ in range(repeat):
-        fn()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    return (time.perf_counter() - start) * 1000.0 / repeat
+def _verified_bench(name, fn, ref, atol=2e-2, rtol=2e-2):
+    """Verify -> time, with the same harness as benchmarks/: a wrong kernel raises BenchmarkError."""
+    check_close(name, fn(), ref, atol=atol, rtol=rtol)
+    return run_bench(fn)
 
 
 def compute_metrics(latency_ms, bytes_read, bytes_written, flops):
@@ -81,7 +73,7 @@ def run_roofline_matmul():
         # PyTorch
         A = torch.randn(M, K, device="cuda", dtype=DTYPE)
         B = torch.randn(K, N, device="cuda", dtype=DTYPE)
-        lat = run_bench(lambda: torch.matmul(A, B))
+        lat = _verified_bench("matmul/PyTorch", lambda: torch.matmul(A, B), A.float() @ B.float(), atol=0.5)
         gflops, gbps = compute_metrics(lat, (M * K + K * N) * 2, M * N * 2, flops)
         results.append({
             "kernel": "matmul",
@@ -99,7 +91,7 @@ def run_roofline_matmul():
             from triton_kernels.matmul import matmul_triton
             A = torch.randn(M, K, device="cuda", dtype=DTYPE)
             B = torch.randn(K, N, device="cuda", dtype=DTYPE)
-            lat = run_bench(lambda: matmul_triton(A, B))
+            lat = _verified_bench("matmul/Triton", lambda: matmul_triton(A, B), A.float() @ B.float(), atol=0.5)
             gflops, gbps = compute_metrics(lat, (M * K + K * N) * 2, M * N * 2, flops)
             results.append({
                 "kernel": "matmul",
@@ -111,8 +103,8 @@ def run_roofline_matmul():
                 "latency_ms": lat,
                 "is_memory_bound": ai < RIDGE_AI,
             })
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+            print(f"  [skip] matmul/Triton {M}x{K}x{N}: {e}", file=sys.stderr)
     return results
 
 
@@ -136,9 +128,10 @@ def run_roofline_conv():
         # PyTorch
         x = torch.randn(B, C_in, H, W, device="cuda", dtype=DTYPE)
         conv = torch.nn.Conv2d(C_in, C_out, 3, padding=0).to("cuda", dtype=DTYPE)
-        w, b = conv.weight, conv.bias
+        w, b = conv.weight.detach(), conv.bias.detach()
         out_h, out_w = H - 2, W - 2
-        lat = run_bench(lambda: torch.nn.functional.conv2d(x, w, b, padding=0))
+        ref = torch.nn.functional.conv2d(x.float(), w.float(), b.float())
+        lat = _verified_bench("conv/PyTorch", lambda: torch.nn.functional.conv2d(x, w, b, padding=0), ref, atol=5e-2, rtol=1e-2)
         br = x.numel() * 2 + w.numel() * 2 + b.numel() * 2
         bw = B * C_out * out_h * out_w * 2
         gflops, gbps = compute_metrics(lat, br, bw, flops)
@@ -161,7 +154,8 @@ def run_roofline_conv():
             b = torch.zeros(C_out, device="cuda", dtype=DTYPE)
             br_tr = x.numel() * 2 + w.numel() * 2 + b.numel() * 2
             bw_tr = B * C_out * out_h * out_w * 2
-            lat = run_bench(lambda: conv2d_triton(x, w, b, use_autotune=True))
+            ref = torch.nn.functional.conv2d(x.float(), w.float(), b.float())
+            lat = _verified_bench("conv/Triton", lambda: conv2d_triton(x, w, b, use_autotune=True), ref, atol=5e-2, rtol=1e-2)
             gflops, gbps = compute_metrics(lat, br_tr, bw_tr, flops)
             results.append({
                 "kernel": "conv2d",
@@ -173,8 +167,8 @@ def run_roofline_conv():
                 "latency_ms": lat,
                 "is_memory_bound": ai < RIDGE_AI,
             })
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+            print(f"  [skip] conv/Triton B{B}: {e}", file=sys.stderr)
 
         # CUDA (only C_in=1, C_out=32)
         if C_in == 1 and C_out == 32:
@@ -182,10 +176,11 @@ def run_roofline_conv():
                 import custom_conv
                 x = torch.randn(B, C_in, H, W, device="cuda", dtype=torch.float32)
                 conv = torch.nn.Conv2d(C_in, C_out, 3, padding=0).to("cuda", dtype=torch.float32)
-                w, b = conv.weight, conv.bias
+                w, b = conv.weight.detach(), conv.bias.detach()
                 br_f32 = x.numel() * 4 + w.numel() * 4 + b.numel() * 4
                 bw_f32 = B * C_out * out_h * out_w * 4
-                lat = run_bench(lambda: custom_conv.custom_conv2d(x, w, b)[0])
+                ref = torch.nn.functional.conv2d(x, w, b)
+                lat = _verified_bench("conv/CUDA", lambda: custom_conv.custom_conv2d(x, w, b)[0], ref, atol=5e-2, rtol=1e-2)
                 gflops, gbps = compute_metrics(lat, br_f32, bw_f32, flops)
                 bytes_cuda = br_f32 + bw_f32
                 ai_cuda = flops / bytes_cuda if bytes_cuda > 0 else 0
@@ -199,8 +194,8 @@ def run_roofline_conv():
                     "latency_ms": lat,
                     "is_memory_bound": ai_cuda < RIDGE_AI,
                 })
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+                print(f"  [skip] conv/CUDA B{B}: {e}", file=sys.stderr)
     return results
 
 
@@ -218,10 +213,10 @@ def run_roofline_attention():
     results = []
     configs = [(2, 8, 128, 64), (4, 8, 256, 64), (2, 8, 512, 64)]
     for B, H, S, D in configs:
-        flops, bytes_total = attention_flops_bytes(B, H, S, D)
-        ai = flops / bytes_total if bytes_total > 0 else 0
-
-        for impl_name, run_fn in [("PyTorch", _run_attn_pytorch), ("Triton", _run_attn_triton)]:
+        for impl_name, run_fn, elem_bytes in [("PyTorch", _run_attn_pytorch, 2), ("Triton", _run_attn_triton, 2),
+                                              ("CUDA", _run_attn_cuda, 4)]:
+            flops, bytes_total = attention_flops_bytes(B, H, S, D, elem_bytes)
+            ai = flops / bytes_total if bytes_total > 0 else 0
             lat, gflops, gbps = run_fn(B, H, S, D)
             if lat is None:
                 continue
@@ -242,7 +237,8 @@ def _run_attn_pytorch(B, H, S, D):
     q = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
     k = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
     v = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-    lat = run_bench(lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=False))
+    ref = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float())
+    lat = _verified_bench("attention/PyTorch", lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=False), ref)
     flops, bytes_total = attention_flops_bytes(B, H, S, D)
     br, bw = (B * H * S * D * 3) * 2, B * H * S * D * 2
     gflops, gbps = compute_metrics(lat, br, bw, flops)
@@ -255,12 +251,29 @@ def _run_attn_triton(B, H, S, D):
         q = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
         k = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
         v = torch.randn(B, H, S, D, device="cuda", dtype=DTYPE)
-        lat = run_bench(lambda: flash_attention_triton(q, k, v, causal=False))
+        ref = torch.nn.functional.scaled_dot_product_attention(q.float(), k.float(), v.float())
+        lat = _verified_bench("attention/Triton", lambda: flash_attention_triton(q, k, v, causal=False), ref)
         flops, bytes_total = attention_flops_bytes(B, H, S, D)
         br, bw = (B * H * S * D * 3) * 2, B * H * S * D * 2
         gflops, gbps = compute_metrics(lat, br, bw, flops)
         return lat, gflops, gbps
-    except Exception:
+    except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+        print(f"  [skip] attention/Triton S={S}: {e}", file=sys.stderr)
+        return None, None, None
+
+
+def _run_attn_cuda(B, H, S, D):
+    """FP32 kernel, so its bytes (and arithmetic intensity) differ from the FP16 rows."""
+    try:
+        from flash_attention_simple.attention_cuda import attention_cuda
+        q, k, v = (torch.randn(B, H, S, D, device="cuda", dtype=torch.float32) for _ in range(3))
+        ref = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        lat = _verified_bench("attention/CUDA", lambda: attention_cuda(q, k, v), ref)
+        flops, _ = attention_flops_bytes(B, H, S, D)
+        gflops, gbps = compute_metrics(lat, (B * H * S * D * 3) * 4, B * H * S * D * 4, flops)
+        return lat, gflops, gbps
+    except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+        print(f"  [skip] attention/CUDA S={S}: {e}", file=sys.stderr)
         return None, None, None
 
 
@@ -302,99 +315,73 @@ def run_roofline_transformer():
         layernorm_pytorch,
         softmax_pytorch,
     )
+    from gpu_kernels.transformer import transformer_cuda as tc
+    from triton_kernels.gelu import gelu_triton
+    from triton_kernels.layernorm import layernorm_triton
+    from triton_kernels.mlp import fused_mlp_triton
+    from triton_kernels.qkv import fused_qkv_triton
+    from triton_kernels.softmax import softmax_triton
+
     B, S, H = 8, 256, 768
     M = B * S
     H3, H4 = H * 3, H * 4
     results = []
-    theory = transformer_flops_bytes(B, S, H)
+    theory = {name: (flops, nbytes) for name, flops, nbytes in transformer_flops_bytes(B, S, H)}
 
-    runners_pytorch = [
-        ("QKV", lambda: fused_qkv_pytorch(
-            torch.randn(M, H, device="cuda", dtype=DTYPE),
-            torch.randn(H, H3, device="cuda", dtype=DTYPE),
-            torch.randn(H3, device="cuda", dtype=DTYPE),
-        )),
-        ("Softmax", lambda: softmax_pytorch(torch.randn(M, H, device="cuda", dtype=DTYPE), dim=-1)),
-        ("LayerNorm", lambda: layernorm_pytorch(
-            torch.randn(M, H, device="cuda", dtype=DTYPE),
-            torch.ones(H, device="cuda", dtype=DTYPE),
-            torch.zeros(H, device="cuda", dtype=DTYPE),
-        )),
-        ("GELU", lambda: gelu_pytorch(torch.randn(M * H, device="cuda", dtype=DTYPE))),
-        ("MLP", lambda: fused_mlp_pytorch(
-            torch.randn(M, H, device="cuda", dtype=DTYPE),
-            torch.randn(H, H4, device="cuda", dtype=DTYPE),
-            torch.randn(H4, device="cuda", dtype=DTYPE),
-            torch.randn(H4, H, device="cuda", dtype=DTYPE),
-            torch.randn(H, device="cuda", dtype=DTYPE),
-        )),
+    def rand(*shape):
+        return torch.randn(*shape, device="cuda", dtype=DTYPE)
+
+    # Inputs are created once, outside the timed region.
+    x, w, b = rand(M, H), rand(H, H3) / H**0.5, rand(H3) * 0.1
+    xs = rand(M, H) * 3
+    xl, g, be = rand(M, H) * 2 + 1, rand(H), rand(H)
+    xg = rand(M * H) * 2
+    xm, w1, b1 = rand(M, H), rand(H, H4) / H**0.5, rand(H4) * 0.1
+    w2, b2 = rand(H4, H) / H4**0.5, rand(H) * 0.1
+
+    qkv_ref = x.float() @ w.float() + b.float()
+    softmax_ref = torch.softmax(xs.float(), -1)
+    ln_ref = torch.nn.functional.layer_norm(xl.float(), (H,), g.float(), be.float(), 1e-5)
+    gelu_ref = torch.nn.functional.gelu(xg.float())
+    gelu_tanh_ref = torch.nn.functional.gelu(xg.float(), approximate="tanh")
+    mlp_ref = fused_mlp_pytorch(xm.float(), w1.float(), b1.float(), w2.float(), b2.float())
+
+    cases = [
+        ("QKV", "PyTorch", lambda: fused_qkv_pytorch(x, w, b), qkv_ref),
+        ("Softmax", "PyTorch", lambda: softmax_pytorch(xs, dim=-1), softmax_ref),
+        ("LayerNorm", "PyTorch", lambda: layernorm_pytorch(xl, g, be), ln_ref),
+        ("GELU", "PyTorch", lambda: gelu_pytorch(xg), gelu_ref),
+        ("MLP", "PyTorch", lambda: fused_mlp_pytorch(xm, w1, b1, w2, b2), mlp_ref),
+        ("QKV", "Triton", lambda: fused_qkv_triton(x, w, b), qkv_ref),
+        ("Softmax", "Triton", lambda: softmax_triton(xs, dim=-1), softmax_ref),
+        ("LayerNorm", "Triton", lambda: layernorm_triton(xl, (H,), g, be), ln_ref),
+        ("GELU", "Triton", lambda: gelu_triton(xg), gelu_ref),
+        ("MLP", "Triton", lambda: fused_mlp_triton(xm, w1, b1, w2, b2), mlp_ref),
+        ("QKV", "CUDA", lambda: tc.fused_qkv_cuda(x, w, b), qkv_ref),
+        ("Softmax", "CUDA", lambda: tc.softmax_cuda(xs, -1), softmax_ref),
+        ("LayerNorm", "CUDA", lambda: tc.layernorm_cuda(xl, g, be, 1e-5), ln_ref),
+        ("GELU", "CUDA", lambda: tc.gelu_cuda(xg), gelu_tanh_ref),  # the CUDA kernel implements the tanh form
+        ("MLP", "CUDA", lambda: tc.fused_mlp_cuda(xm, w1, b1, w2, b2), mlp_ref),
     ]
-
-    for (name, flops, bytes_total), (_, run_fn) in zip(theory, runners_pytorch):
+    for name, impl, run_fn, ref in cases:
+        flops, bytes_total = theory[name]
         ai = flops / bytes_total if bytes_total > 0 else 0
-        lat = run_bench(run_fn)
-        gflops, gbps = compute_metrics(lat, bytes_total // 2, bytes_total // 2, flops if "GELU" not in name else None)
-        if gflops is None:
-            gflops = 0.0
+        try:
+            lat = _verified_bench(f"{name}/{impl}", run_fn, ref)
+        except Exception as e:  # noqa: BLE001 - report the failure, keep the other kernels
+            print(f"  [skip] {name}/{impl}: {e}", file=sys.stderr)
+            continue
+        gflops, gbps = compute_metrics(lat, bytes_total // 2, bytes_total // 2, flops)
         results.append({
             "kernel": "transformer",
             "config": name,
-            "implementation": "PyTorch",
+            "implementation": impl,
             "flops": flops, "bytes": bytes_total,
             "arithmetic_intensity": ai,
             "achieved_gflops": gflops, "achieved_gbps": gbps,
             "latency_ms": lat,
             "is_memory_bound": ai < RIDGE_AI,
         })
-
-    # Triton
-    try:
-        from triton_kernels.gelu import gelu_triton
-        from triton_kernels.layernorm import layernorm_triton
-        from triton_kernels.mlp import fused_mlp_triton
-        from triton_kernels.qkv import fused_qkv_triton
-        from triton_kernels.softmax import softmax_triton
-    except Exception:
-        return results
-
-    x_qkv = torch.randn(M, H, device="cuda", dtype=DTYPE)
-    w_qkv = torch.randn(H, H3, device="cuda", dtype=DTYPE)
-    b_qkv = torch.randn(H3, device="cuda", dtype=DTYPE)
-    x_ln = torch.randn(M, H, device="cuda", dtype=DTYPE)
-    w_ln = torch.ones(H, device="cuda", dtype=DTYPE)
-    b_ln = torch.zeros(H, device="cuda", dtype=DTYPE)
-    x_mlp1 = torch.randn(M, H, device="cuda", dtype=DTYPE)
-    w1 = torch.randn(H, H4, device="cuda", dtype=DTYPE)
-    b1 = torch.randn(H4, device="cuda", dtype=DTYPE)
-    w2 = torch.randn(H4, H, device="cuda", dtype=DTYPE)
-    b2 = torch.randn(H, device="cuda", dtype=DTYPE)
-
-    triton_runners = [
-        ("QKV", lambda: fused_qkv_triton(x_qkv, w_qkv, b_qkv)),
-        ("Softmax", lambda: softmax_triton(torch.randn(M, H, device="cuda", dtype=DTYPE), dim=-1)),
-        ("LayerNorm", lambda: layernorm_triton(x_ln, (H,), w_ln, b_ln)),
-        ("GELU", lambda: gelu_triton(torch.randn(M * H, device="cuda", dtype=DTYPE))),
-        ("MLP", lambda: fused_mlp_triton(x_mlp1, w1, b1, w2, b2)),
-    ]
-    for (name, flops, bytes_total), (_, run_fn) in zip(theory, triton_runners):
-        ai = flops / bytes_total if bytes_total > 0 else 0
-        try:
-            lat = run_bench(run_fn)
-            gflops, gbps = compute_metrics(lat, bytes_total // 2, bytes_total // 2, flops if "GELU" not in name else None)
-            if gflops is None:
-                gflops = 0.0
-            results.append({
-                "kernel": "transformer",
-                "config": name,
-                "implementation": "Triton",
-                "flops": flops, "bytes": bytes_total,
-                "arithmetic_intensity": ai,
-                "achieved_gflops": gflops, "achieved_gbps": gbps,
-                "latency_ms": lat,
-                "is_memory_bound": ai < RIDGE_AI,
-            })
-        except Exception:
-            pass
     return results
 
 
@@ -421,6 +408,14 @@ def save_results(all_results):
     print(f"JSON saved: {json_path}")
 
 
+LABEL_OFFSETS = {
+    "attention": ((-40, -75), "right"),
+    "MLP": ((-15, -100), "center"),
+    "QKV": ((-30, 45), "right"),
+    "matmul": ((10, 32), "center"),
+}
+
+
 def plot_roofline(all_results):
     try:
         import matplotlib
@@ -443,6 +438,15 @@ def plot_roofline(all_results):
 
     styles = {"PyTorch": ("o", "#1f77b4"), "Triton": ("s", "#ff7f0e"), "CUDA": ("^", "#2ca02c")}
     seen = set()
+    # Label one point per kernel (largest config, best implementation) so the labels stay readable.
+    labeled = {}
+    for r in all_results:
+        category = r["config"] if r["kernel"] == "transformer" else r["kernel"]
+        roof = min(PEAK_GBPS * r["arithmetic_intensity"], PEAK_GFLOPS)
+        rank = (r["flops"], r["achieved_gflops"] / roof)
+        if category not in labeled or rank > labeled[category][0]:
+            labeled[category] = (rank, id(r))
+    labeled_ids = {v[1] for v in labeled.values()}
     for r in all_results:
         ai = r["arithmetic_intensity"]
         # Recompute from FLOPs and latency (elementwise kernels were stored with 0 GFLOPS before).
@@ -455,8 +459,12 @@ def plot_roofline(all_results):
         ax.scatter([ai], [perf], marker=marker, c=color, s=60, edgecolors="black", linewidths=0.5, label=label, zorder=3)
         roof = min(PEAK_GBPS * ai, PEAK_GFLOPS)
         name = r["config"] if r["kernel"] == "transformer" else f"{r['kernel']} {r['config']}"
-        ax.annotate(f"{name} ({100 * perf / roof:.0f}%)", (ai, perf), textcoords="offset points", xytext=(5, -10),
-                    fontsize=7, alpha=0.8)
+        if id(r) in labeled_ids:
+            # The compute-bound points cluster near the roof, so their labels get leader lines.
+            offset, ha = LABEL_OFFSETS.get(r["config"] if r["kernel"] == "transformer" else r["kernel"], ((-6, 8), "right"))
+            ax.annotate(f"{name} {r['implementation']} ({100 * perf / roof:.0f}%)", (ai, perf),
+                        textcoords="offset points", xytext=offset, ha=ha, fontsize=8,
+                        arrowprops={"arrowstyle": "-", "color": "gray", "linewidth": 0.6})
 
     ax.text(ridge * 0.6, PEAK_GFLOPS * 0.02, "memory-bound", ha="right", fontsize=10, color="gray")
     ax.text(ridge * 1.6, PEAK_GFLOPS * 0.02, "compute-bound", ha="left", fontsize=10, color="gray")
