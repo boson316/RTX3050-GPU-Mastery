@@ -1,0 +1,9 @@
+implementation,config,latency_ms,gflops,memory_bandwidth_gbs,gpu_utilization_pct
+PyTorch,B32_C1x32_28x28,0.0603,206.66,23.8,78.0
+Triton,B32_C1x32_28x28,0.0724,172.05,19.82,78.0
+CUDA,B32_C1x32_28x28,0.0391,319.04,73.5,
+PyTorch,B128_C1x32_28x28,0.1824,273.27,31.47,
+Triton,B128_C1x32_28x28,0.0791,630.47,72.6,
+CUDA,B128_C1x32_28x28,0.136,366.4,84.38,
+PyTorch,B128_C1x64_64x64,1.7849,317.56,35.87,
+Triton,B128_C1x64_64x64,0.9371,604.84,68.32,

@@ -1,0 +1,25 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+Transformer kernels (FP16) on NVIDIA GeForce RTX 3050 6GB Laptop GPU: B=8 S=256 H=768, CUDA ext: True
+
+--- Transformer kernels (verified) ---
+kernel    | implementation | latency_ms | gflops  | memory_bandwidth_gbs
+----------+----------------+------------+---------+---------------------
+QKV       | PyTorch        | 0.6087     | 11906.2 | 26.5                
+QKV       | Triton         | 0.674      | 10753.1 | 23.9                
+QKV       | CUDA           | 0.7752     | 9349.7  | 20.8                
+Softmax   | PyTorch        | 0.0547     | None    | 115.0               
+Softmax   | Triton         | 0.0566     | None    | 111.2               
+Softmax   | CUDA           | 0.099      | None    | 63.6                
+LayerNorm | PyTorch        | 0.0772     | None    | 81.5                
+LayerNorm | Triton         | 0.0729     | None    | 86.3                
+LayerNorm | CUDA           | 0.118      | None    | 53.3                
+GELU      | PyTorch        | 0.0555     | None    | 113.3               
+GELU      | Triton         | 0.0543     | None    | 115.8               
+GELU      | CUDA           | 0.0573     | None    | 109.7               
+MLP       | PyTorch        | 1.7078     | 11317.1 | 9.2                 
+MLP       | Triton         | 1.6976     | 11384.8 | 9.3                 
+MLP       | CUDA           | 1.7258     | 11199.0 | 9.1                 
+
+CSV: benchmarks/benchmark_transformer_results.csv, charts: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\plots

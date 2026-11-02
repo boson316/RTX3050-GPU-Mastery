@@ -1,0 +1,20 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+cudnn 90100 flash_sdp True mem_eff_sdp True math_sdp True
+S=1024 _fused_sdp_choice=2
+  naive q@k^T peak_extra_mib=72.1
+  SDPA    max_abs_err_vs_FP64=1.104e-06
+  Triton  max_abs_err_vs_FP64=1.364e-03
+  CUDA    max_abs_err_vs_FP64=8.538e-07
+S=2048 _fused_sdp_choice=2
+  naive q@k^T peak_extra_mib=256.0
+  SDPA    max_abs_err_vs_FP64=7.044e-07
+  Triton  max_abs_err_vs_FP64=8.341e-04
+  CUDA    max_abs_err_vs_FP64=6.183e-07
+S=4096 _fused_sdp_choice=2
+  naive q@k^T peak_extra_mib=1024.0
+  SDPA    max_abs_err_vs_FP64=3.338e-07
+  Triton  max_abs_err_vs_FP64=5.551e-04
+  CUDA    max_abs_err_vs_FP64=6.030e-07
+SDPBackend {'CUDNN_ATTENTION': 3, 'EFFICIENT_ATTENTION': 2, 'ERROR': -1, 'FLASH_ATTENTION': 1, 'MATH': 0, 'OVERRIDEABLE': 4}

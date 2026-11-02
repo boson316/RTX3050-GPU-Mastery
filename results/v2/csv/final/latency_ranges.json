@@ -1,0 +1,197 @@
+{
+ "matmul|PyTorch|512x512x512": {
+  "min": 0.0529,
+  "median": 0.0534,
+  "max": 0.0658
+ },
+ "matmul|Triton|512x512x512": {
+  "min": 0.0604,
+  "median": 0.0685,
+  "max": 0.069
+ },
+ "matmul|PyTorch|1024x1024x1024": {
+  "min": 0.1675,
+  "median": 0.1678,
+  "max": 0.184
+ },
+ "matmul|Triton|1024x1024x1024": {
+  "min": 0.1383,
+  "median": 0.141,
+  "max": 0.1555
+ },
+ "matmul|CUDA|1024x1024x1024": {
+  "min": 0.2007,
+  "median": 0.2017,
+  "max": 0.2222
+ },
+ "matmul|PyTorch|2048x2048x2048": {
+  "min": 1.1776,
+  "median": 1.1966,
+  "max": 1.2051
+ },
+ "matmul|Triton|2048x2048x2048": {
+  "min": 1.2104,
+  "median": 1.2261,
+  "max": 1.2334
+ },
+ "conv|PyTorch|B32_C1x32_28x28": {
+  "min": 0.0409,
+  "median": 0.0841,
+  "max": 0.0862
+ },
+ "conv|Triton|B32_C1x32_28x28": {
+  "min": 0.0666,
+  "median": 0.0713,
+  "max": 0.103
+ },
+ "conv|CUDA|B32_C1x32_28x28": {
+  "min": 0.0352,
+  "median": 0.0356,
+  "max": 0.0357
+ },
+ "conv|PyTorch|B128_C1x32_28x28": {
+  "min": 0.1677,
+  "median": 0.1684,
+  "max": 0.171
+ },
+ "conv|Triton|B128_C1x32_28x28": {
+  "min": 0.0764,
+  "median": 0.0832,
+  "max": 0.1018
+ },
+ "conv|CUDA|B128_C1x32_28x28": {
+  "min": 0.1243,
+  "median": 0.1245,
+  "max": 0.1254
+ },
+ "conv|PyTorch|B128_C1x64_64x64": {
+  "min": 1.6692,
+  "median": 1.6803,
+  "max": 1.7103
+ },
+ "conv|Triton|B128_C1x64_64x64": {
+  "min": 1.0186,
+  "median": 1.0442,
+  "max": 1.0488
+ },
+ "attention|PyTorch|B2_H8_S128_D64": {
+  "min": 0.0164,
+  "median": 0.037,
+  "max": 0.0493
+ },
+ "attention|Triton|B2_H8_S128_D64": {
+  "min": 0.071,
+  "median": 0.0933,
+  "max": 0.1281
+ },
+ "attention|CUDA|B2_H8_S128_D64": {
+  "min": 0.097,
+  "median": 0.0974,
+  "max": 0.1069
+ },
+ "attention|PyTorch|B4_H8_S256_D64": {
+  "min": 0.0582,
+  "median": 0.0595,
+  "max": 0.0598
+ },
+ "attention|Triton|B4_H8_S256_D64": {
+  "min": 0.0603,
+  "median": 0.0637,
+  "max": 0.1413
+ },
+ "attention|CUDA|B4_H8_S256_D64": {
+  "min": 0.3846,
+  "median": 0.3859,
+  "max": 0.4052
+ },
+ "attention|PyTorch|B2_H8_S512_D64": {
+  "min": 0.1049,
+  "median": 0.106,
+  "max": 0.1067
+ },
+ "attention|Triton|B2_H8_S512_D64": {
+  "min": 0.0873,
+  "median": 0.0881,
+  "max": 0.0973
+ },
+ "attention|CUDA|B2_H8_S512_D64": {
+  "min": 0.678,
+  "median": 0.6878,
+  "max": 0.6907
+ },
+ "transformer|QKV|PyTorch": {
+  "min": 0.5375,
+  "median": 0.5449,
+  "max": 0.6087
+ },
+ "transformer|QKV|Triton": {
+  "min": 0.5464,
+  "median": 0.5865,
+  "max": 0.674
+ },
+ "transformer|QKV|CUDA": {
+  "min": 0.6738,
+  "median": 0.6748,
+  "max": 0.7752
+ },
+ "transformer|Softmax|PyTorch": {
+  "min": 0.0544,
+  "median": 0.0544,
+  "max": 0.0547
+ },
+ "transformer|Softmax|Triton": {
+  "min": 0.0566,
+  "median": 0.0569,
+  "max": 0.06
+ },
+ "transformer|Softmax|CUDA": {
+  "min": 0.0934,
+  "median": 0.0939,
+  "max": 0.099
+ },
+ "transformer|LayerNorm|PyTorch": {
+  "min": 0.0559,
+  "median": 0.0563,
+  "max": 0.0772
+ },
+ "transformer|LayerNorm|Triton": {
+  "min": 0.0654,
+  "median": 0.0667,
+  "max": 0.0729
+ },
+ "transformer|LayerNorm|CUDA": {
+  "min": 0.1099,
+  "median": 0.1106,
+  "max": 0.118
+ },
+ "transformer|GELU|PyTorch": {
+  "min": 0.0554,
+  "median": 0.0555,
+  "max": 0.0555
+ },
+ "transformer|GELU|Triton": {
+  "min": 0.0543,
+  "median": 0.0544,
+  "max": 0.0603
+ },
+ "transformer|GELU|CUDA": {
+  "min": 0.0561,
+  "median": 0.0564,
+  "max": 0.0573
+ },
+ "transformer|MLP|PyTorch": {
+  "min": 1.5843,
+  "median": 1.6118,
+  "max": 1.7078
+ },
+ "transformer|MLP|Triton": {
+  "min": 1.6297,
+  "median": 1.6336,
+  "max": 1.6976
+ },
+ "transformer|MLP|CUDA": {
+  "min": 1.6786,
+  "median": 1.6808,
+  "max": 1.7258
+ }
+}

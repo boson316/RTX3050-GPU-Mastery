@@ -1,0 +1,65 @@
+=== matmul
+  PyTorch | 512x512x512                           0.0529    0.0658    0.0534   24.4% >5%
+  Triton | 512x512x512                            0.0685    0.0604    0.0690   14.2% >5%
+  PyTorch | 1024x1024x1024                        0.1675    0.1678    0.1840    9.9% >5%
+  Triton | 1024x1024x1024                         0.1410    0.1383    0.1555   12.4% >5%
+  CUDA | 1024x1024x1024                           0.2007    0.2222    0.2017   10.7% >5%
+  PyTorch | 2048x2048x2048                        1.1776    1.1966    1.2051    2.3%
+  Triton | 2048x2048x2048                         1.2104    1.2334    1.2261    1.9%
+=== conv
+  PyTorch | B32_C1x32_28x28                       0.0409    0.0862    0.0841  110.8% >5%
+  Triton | B32_C1x32_28x28                        0.0713    0.1030    0.0666   54.7% >5%
+  CUDA | B32_C1x32_28x28                          0.0352    0.0356    0.0357    1.4%
+  PyTorch | B128_C1x32_28x28                      0.1677    0.1684    0.1710    2.0%
+  Triton | B128_C1x32_28x28                       0.0832    0.1018    0.0764   33.2% >5%
+  CUDA | B128_C1x32_28x28                         0.1245    0.1254    0.1243    0.9%
+  PyTorch | B128_C1x64_64x64                      1.6692    1.7103    1.6803    2.5%
+  Triton | B128_C1x64_64x64                       1.0186    1.0488    1.0442    3.0%
+=== attention
+  PyTorch | B2_H8_S128_D64                        0.0370    0.0493    0.0164  200.6% >5%
+  Triton | B2_H8_S128_D64                         0.0933    0.0710    0.1281   80.4% >5%
+  CUDA | B2_H8_S128_D64                           0.0970    0.1069    0.0974   10.2% >5%
+  PyTorch | B4_H8_S256_D64                        0.0582    0.0595    0.0598    2.7%
+  Triton | B4_H8_S256_D64                         0.0637    0.1413    0.0603  134.3% >5%
+  CUDA | B4_H8_S256_D64                           0.3846    0.4052    0.3859    5.4% >5%
+  PyTorch | B2_H8_S512_D64                        0.1049    0.1060    0.1067    1.7%
+  Triton | B2_H8_S512_D64                         0.0873    0.0973    0.0881   11.5% >5%
+  CUDA | B2_H8_S512_D64                           0.6780    0.6907    0.6878    1.9%
+=== transformer
+  QKV | PyTorch                                   0.5375    0.6087    0.5449   13.2% >5%
+  QKV | Triton                                    0.5464    0.6740    0.5865   23.4% >5%
+  QKV | CUDA                                      0.6738    0.7752    0.6748   15.0% >5%
+  Softmax | PyTorch                               0.0544    0.0547    0.0544    0.6%
+  Softmax | Triton                                0.0569    0.0566    0.0600    6.0% >5%
+  Softmax | CUDA                                  0.0934    0.0990    0.0939    6.0% >5%
+  LayerNorm | PyTorch                             0.0563    0.0772    0.0559   38.1% >5%
+  LayerNorm | Triton                              0.0667    0.0729    0.0654   11.5% >5%
+  LayerNorm | CUDA                                0.1106    0.1180    0.1099    7.4% >5%
+  GELU | PyTorch                                  0.0554    0.0555    0.0555    0.2%
+  GELU | Triton                                   0.0544    0.0543    0.0603   11.0% >5%
+  GELU | CUDA                                     0.0561    0.0573    0.0564    2.1%
+  MLP | PyTorch                                   1.5843    1.7078    1.6118    7.8% >5%
+  MLP | Triton                                    1.6336    1.6976    1.6297    4.2%
+  MLP | CUDA                                      1.6786    1.7258    1.6808    2.8%
+entries over 5%: 24
+=== clocks while GPU util >= 50%
+  attention_pre_fix_run1_clocks.csv      n=  4 SM med=1755 min=1755 max=1755 MHz  W med=23.6  Tmax=59
+  attention_pre_fix_run2_clocks.csv      n=  5 SM med=1755 min=1095 max=1755 MHz  W med=28.2  Tmax=61
+  attention_run1_clocks.csv              n= 21 SM med=1755 min=1755 max=1755 MHz  W med=41.8  Tmax=65
+  attention_run2_clocks.csv              n= 23 SM med=1740 min=1657 max=1747 MHz  W med=41.4  Tmax=69
+  attention_run3_clocks.csv              n= 22 SM med=1740 min=1717 max=1747 MHz  W med=40.3  Tmax=68
+  conv_pre_fix_run1_clocks.csv           n=  6 SM med=1638 min=990 max=1755 MHz  W med=30.2  Tmax=59
+  conv_pre_fix_run2_clocks.csv           n=  6 SM med=1698 min=1275 max=1755 MHz  W med=31.3  Tmax=61
+  conv_run1_clocks.csv                   n= 22 SM med=1755 min=990 max=1755 MHz  W med=42.6  Tmax=64
+  conv_run2_clocks.csv                   n= 22 SM med=1747 min=1200 max=1747 MHz  W med=42.3  Tmax=69
+  conv_run3_clocks.csv                   n= 22 SM med=1747 min=1537 max=1747 MHz  W med=42.5  Tmax=67
+  matmul_pre_fix_run1_clocks.csv         n= 12 SM med=1718 min=990 max=1762 MHz  W med=27.1  Tmax=58
+  matmul_pre_fix_run2_clocks.csv         n=  8 SM med=1755 min=1395 max=1755 MHz  W med=30.2  Tmax=60
+  matmul_run1_clocks.csv                 n= 18 SM med=1755 min=1642 max=1755 MHz  W med=41.3  Tmax=62
+  matmul_run2_clocks.csv                 n= 20 SM med=1755 min=1620 max=1755 MHz  W med=42.2  Tmax=67
+  matmul_run3_clocks.csv                 n= 20 SM med=1747 min=1117 max=1747 MHz  W med=35.8  Tmax=66
+  transformer_pre_fix_run1_clocks.csv    n=  5 SM med=1575 min=1395 max=1755 MHz  W med=21.6  Tmax=61
+  transformer_pre_fix_run2_clocks.csv    n=  8 SM med=1755 min=1335 max=1755 MHz  W med=31.4  Tmax=63
+  transformer_run1_clocks.csv            n= 38 SM med=1755 min=990 max=1755 MHz  W med=43.6  Tmax=67
+  transformer_run2_clocks.csv            n= 36 SM med=1665 min=1200 max=1747 MHz  W med=40.2  Tmax=71
+  transformer_run3_clocks.csv            n= 36 SM med=1732 min=1200 max=1747 MHz  W med=43.6  Tmax=70

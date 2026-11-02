@@ -1,0 +1,8 @@
+GPU: NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Repo root: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2
+Report output: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\performance_report.md
+Skipping benchmark runs (--skip-benchmarks).
+Running generate_charts.py ...
+  OK
+Report written: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\performance_report.md
+Done.

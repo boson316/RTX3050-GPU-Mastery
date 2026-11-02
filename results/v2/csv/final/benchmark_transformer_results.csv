@@ -1,0 +1,16 @@
+kernel,implementation,latency_ms,gflops,memory_bandwidth_gbs
+QKV,PyTorch,0.5449,13300.8,29.6
+QKV,Triton,0.5865,12357.5,27.5
+QKV,CUDA,0.6748,10741.3,23.9
+Softmax,PyTorch,0.0544,,115.7
+Softmax,Triton,0.0569,,110.5
+Softmax,CUDA,0.0939,,67.0
+LayerNorm,PyTorch,0.0563,,111.8
+LayerNorm,Triton,0.0667,,94.4
+LayerNorm,CUDA,0.1106,,56.9
+GELU,PyTorch,0.0555,,113.3
+GELU,Triton,0.0544,,115.7
+GELU,CUDA,0.0564,,111.5
+MLP,PyTorch,1.6118,11991.5,9.8
+MLP,Triton,1.6336,11831.4,9.6
+MLP,CUDA,1.6808,11498.8,9.4

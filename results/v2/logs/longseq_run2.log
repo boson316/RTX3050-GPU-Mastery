@@ -1,0 +1,12 @@
+{'S': 1024, 'impl': 'SDPA', 'verified': 'PASS', 'latency_ms': 1.2713, 'peak_extra_mib': 2.0}
+{'S': 1024, 'impl': 'Triton', 'verified': 'PASS', 'latency_ms': 0.3573, 'peak_extra_mib': 2.0}
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+{'S': 1024, 'impl': 'CUDA', 'verified': 'PASS', 'latency_ms': 1.2412, 'peak_extra_mib': 2.0}
+{'S': 2048, 'impl': 'SDPA', 'verified': 'PASS', 'latency_ms': 4.7501, 'peak_extra_mib': 4.0}
+{'S': 2048, 'impl': 'Triton', 'verified': 'PASS', 'latency_ms': 1.3008, 'peak_extra_mib': 4.0}
+{'S': 2048, 'impl': 'CUDA', 'verified': 'PASS', 'latency_ms': 4.8357, 'peak_extra_mib': 4.0}
+{'S': 4096, 'impl': 'SDPA', 'verified': 'PASS', 'latency_ms': 20.1815, 'peak_extra_mib': 8.0}
+{'S': 4096, 'impl': 'Triton', 'verified': 'PASS', 'latency_ms': 5.1155, 'peak_extra_mib': 8.0}
+{'S': 4096, 'impl': 'CUDA', 'verified': 'PASS', 'latency_ms': 17.3028, 'peak_extra_mib': 8.0}

@@ -6,9 +6,21 @@
     "flops": 268435456,
     "bytes": 1572864,
     "arithmetic_intensity": 170.66666666666666,
-    "achieved_gflops": 3539.123715336012,
-    "achieved_gbps": 20.737053019546945,
-    "latency_ms": 0.07584800012409687,
+    "achieved_gflops": 4254.2032576137135,
+    "achieved_gbps": 24.92697221258035,
+    "latency_ms": 0.06309887886047363,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "matmul",
+    "config": "512x512x512",
+    "implementation": "Triton",
+    "flops": 268435456,
+    "bytes": 1572864,
+    "arithmetic_intensity": 170.66666666666666,
+    "achieved_gflops": 2809.689235823918,
+    "achieved_gbps": 16.463022866155768,
+    "latency_ms": 0.09553919792175293,
     "is_memory_bound": false
   },
   {
@@ -18,9 +30,21 @@
     "flops": 2147483648,
     "bytes": 6291456,
     "arithmetic_intensity": 341.3333333333333,
-    "achieved_gflops": 12795.741187591908,
-    "achieved_gbps": 37.48752301052317,
-    "latency_ms": 0.16782799968495965,
+    "achieved_gflops": 11730.719451289266,
+    "achieved_gbps": 34.36734214244902,
+    "latency_ms": 0.18306495666503905,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "matmul",
+    "config": "1024x1024x1024",
+    "implementation": "Triton",
+    "flops": 2147483648,
+    "bytes": 6291456,
+    "arithmetic_intensity": 341.3333333333333,
+    "achieved_gflops": 14962.557480467032,
+    "achieved_gbps": 43.83561761855576,
+    "latency_ms": 0.14352383613586425,
     "is_memory_bound": false
   },
   {
@@ -30,9 +54,21 @@
     "flops": 17179869184,
     "bytes": 25165824,
     "arithmetic_intensity": 682.6666666666666,
-    "achieved_gflops": 14949.520335112127,
-    "achieved_gbps": 21.898711428386903,
-    "latency_ms": 1.1491920007392764,
+    "achieved_gflops": 13828.439237676046,
+    "achieved_gbps": 20.256502789564518,
+    "latency_ms": 1.2423577880859376,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "matmul",
+    "config": "2048x2048x2048",
+    "implementation": "Triton",
+    "flops": 17179869184,
+    "bytes": 25165824,
+    "arithmetic_intensity": 682.6666666666666,
+    "achieved_gflops": 13652.44463347717,
+    "achieved_gbps": 19.99869819357007,
+    "latency_ms": 1.2583731079101563,
     "is_memory_bound": false
   },
   {
@@ -42,9 +78,33 @@
     "flops": 12460032,
     "bytes": 1435264,
     "arithmetic_intensity": 8.681352002140374,
-    "achieved_gflops": 189.48889802659235,
-    "achieved_gbps": 21.827118400437417,
-    "latency_ms": 0.06575600011274219,
+    "achieved_gflops": 325.17369624628725,
+    "achieved_gbps": 37.45657314276811,
+    "latency_ms": 0.03831808090209961,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "conv2d",
+    "config": "B32_1x32_28x28",
+    "implementation": "Triton",
+    "flops": 12460032,
+    "bytes": 1435264,
+    "arithmetic_intensity": 8.681352002140374,
+    "achieved_gflops": 196.4521443583965,
+    "achieved_gbps": 22.62921078536633,
+    "latency_ms": 0.06342527866363526,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "conv2d",
+    "config": "B32_1x32_28x28",
+    "implementation": "CUDA",
+    "flops": 12460032,
+    "bytes": 2870528,
+    "arithmetic_intensity": 4.340676001070187,
+    "achieved_gflops": 350.05754492357516,
+    "achieved_gbps": 80.64585904068146,
+    "latency_ms": 0.035594239234924316,
     "is_memory_bound": true
   },
   {
@@ -54,9 +114,33 @@
     "flops": 49840128,
     "bytes": 5739136,
     "arithmetic_intensity": 8.684256306175703,
-    "achieved_gflops": 294.01430201818727,
-    "achieved_gbps": 33.85601387756169,
-    "latency_ms": 0.16951599856838584,
+    "achieved_gflops": 289.71429604444006,
+    "achieved_gbps": 33.360864284764745,
+    "latency_ms": 0.1720319938659668,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "conv2d",
+    "config": "B128_1x32_28x28",
+    "implementation": "Triton",
+    "flops": 49840128,
+    "bytes": 5739136,
+    "arithmetic_intensity": 8.684256306175703,
+    "achieved_gflops": 608.3999711025518,
+    "achieved_gbps": 70.05780917243261,
+    "latency_ms": 0.08192000389099122,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "conv2d",
+    "config": "B128_1x32_28x28",
+    "implementation": "CUDA",
+    "flops": 49840128,
+    "bytes": 11478272,
+    "arithmetic_intensity": 4.3421281530878515,
+    "achieved_gflops": 402.1150044710101,
+    "achieved_gbps": 92.6078158667544,
+    "latency_ms": 0.12394495964050294,
     "is_memory_bound": true
   },
   {
@@ -66,9 +150,21 @@
     "flops": 566820864,
     "bytes": 64029952,
     "arithmetic_intensity": 8.852433061327298,
-    "achieved_gflops": 339.5893828925242,
-    "achieved_gbps": 38.36113535566317,
-    "latency_ms": 1.6691359994001687,
+    "achieved_gflops": 334.42243138937937,
+    "achieved_gbps": 37.77745949306703,
+    "latency_ms": 1.6949247741699218,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "conv2d",
+    "config": "B128_1x64_64x64",
+    "implementation": "Triton",
+    "flops": 566820864,
+    "bytes": 64029952,
+    "arithmetic_intensity": 8.852433061327298,
+    "achieved_gflops": 537.2675420446243,
+    "achieved_gbps": 60.69151139834414,
+    "latency_ms": 1.0550067138671875,
     "is_memory_bound": true
   },
   {
@@ -78,10 +174,34 @@
     "flops": 67108864,
     "bytes": 1048576,
     "arithmetic_intensity": 64.0,
-    "achieved_gflops": 1419.2720982377068,
-    "achieved_gbps": 22.17612653496417,
-    "latency_ms": 0.04728400148451328,
-    "is_memory_bound": false
+    "achieved_gflops": 3981.9845048221096,
+    "achieved_gbps": 62.21850788784546,
+    "latency_ms": 0.01685312032699585,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "attention",
+    "config": "B2_H8_S128_D64",
+    "implementation": "Triton",
+    "flops": 67108864,
+    "bytes": 1048576,
+    "arithmetic_intensity": 64.0,
+    "achieved_gflops": 1005.6932540483236,
+    "achieved_gbps": 15.713957094505057,
+    "latency_ms": 0.06672895908355712,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "attention",
+    "config": "B2_H8_S128_D64",
+    "implementation": "CUDA",
+    "flops": 67108864,
+    "bytes": 2097152,
+    "arithmetic_intensity": 32.0,
+    "achieved_gflops": 675.3764705816232,
+    "achieved_gbps": 21.105514705675724,
+    "latency_ms": 0.09936511993408204,
+    "is_memory_bound": true
   },
   {
     "kernel": "attention",
@@ -90,10 +210,34 @@
     "flops": 536870912,
     "bytes": 4194304,
     "arithmetic_intensity": 128.0,
-    "achieved_gflops": 9116.194037499183,
-    "achieved_gbps": 71.22026591796237,
-    "latency_ms": 0.058892001397907734,
-    "is_memory_bound": false
+    "achieved_gflops": 9138.016911725192,
+    "achieved_gbps": 71.39075712285306,
+    "latency_ms": 0.05875135898590088,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "attention",
+    "config": "B4_H8_S256_D64",
+    "implementation": "Triton",
+    "flops": 536870912,
+    "bytes": 4194304,
+    "arithmetic_intensity": 128.0,
+    "achieved_gflops": 8086.574452675716,
+    "achieved_gbps": 63.17636291152903,
+    "latency_ms": 0.06639039993286133,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "attention",
+    "config": "B4_H8_S256_D64",
+    "implementation": "CUDA",
+    "flops": 536870912,
+    "bytes": 8388608,
+    "arithmetic_intensity": 64.0,
+    "achieved_gflops": 1355.309712240753,
+    "achieved_gbps": 21.176714253761766,
+    "latency_ms": 0.39612415313720706,
+    "is_memory_bound": true
   },
   {
     "kernel": "attention",
@@ -102,10 +246,34 @@
     "flops": 1073741824,
     "bytes": 4194304,
     "arithmetic_intensity": 256.0,
-    "achieved_gflops": 10029.721092628928,
-    "achieved_gbps": 39.17859801808175,
-    "latency_ms": 0.10705600026994944,
+    "achieved_gflops": 9975.03809937389,
+    "achieved_gbps": 38.96499257567926,
+    "latency_ms": 0.10764287948608399,
     "is_memory_bound": false
+  },
+  {
+    "kernel": "attention",
+    "config": "B2_H8_S512_D64",
+    "implementation": "Triton",
+    "flops": 1073741824,
+    "bytes": 4194304,
+    "arithmetic_intensity": 256.0,
+    "achieved_gflops": 12164.454129314718,
+    "achieved_gbps": 47.517398942635616,
+    "latency_ms": 0.0882688045501709,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "attention",
+    "config": "B2_H8_S512_D64",
+    "implementation": "CUDA",
+    "flops": 1073741824,
+    "bytes": 8388608,
+    "arithmetic_intensity": 128.0,
+    "achieved_gflops": 1561.9149676200173,
+    "achieved_gbps": 12.202460684531385,
+    "latency_ms": 0.687452163696289,
+    "is_memory_bound": true
   },
   {
     "kernel": "transformer",
@@ -114,9 +282,9 @@
     "flops": 7247757312,
     "bytes": 16126464,
     "arithmetic_intensity": 449.43251738260784,
-    "achieved_gflops": 12346.863931292355,
-    "achieved_gbps": 27.47211973712464,
-    "latency_ms": 0.5870120017789304,
+    "achieved_gflops": 12916.899807118545,
+    "achieved_gbps": 28.74046560392117,
+    "latency_ms": 0.5611065673828125,
     "is_memory_bound": false
   },
   {
@@ -126,9 +294,9 @@
     "flops": 7864320,
     "bytes": 6291456,
     "arithmetic_intensity": 1.25,
-    "achieved_gflops": 86.21645256542458,
-    "achieved_gbps": 68.97316205233966,
-    "latency_ms": 0.09121600072830915,
+    "achieved_gflops": 145.08358913817693,
+    "achieved_gbps": 116.06687131054156,
+    "latency_ms": 0.05420544147491455,
     "is_memory_bound": true
   },
   {
@@ -138,9 +306,9 @@
     "flops": 6291456,
     "bytes": 6294528,
     "arithmetic_intensity": 0.9995119570522206,
-    "achieved_gflops": 68.84334770097955,
-    "achieved_gbps": 68.87696261684917,
-    "latency_ms": 0.09138800203800201,
+    "achieved_gflops": 111.19607699022355,
+    "achieved_gbps": 111.25037194969143,
+    "latency_ms": 0.05657983779907227,
     "is_memory_bound": true
   },
   {
@@ -150,9 +318,9 @@
     "flops": 12582912,
     "bytes": 6291456,
     "arithmetic_intensity": 2.0,
-    "achieved_gflops": 0.0,
-    "achieved_gbps": 72.60600949347506,
-    "latency_ms": 0.08665200090035796,
+    "achieved_gflops": 226.54867853259344,
+    "achieved_gbps": 113.27433926629672,
+    "latency_ms": 0.05554175853729248,
     "is_memory_bound": true
   },
   {
@@ -162,9 +330,21 @@
     "flops": 19377684480,
     "bytes": 50339328,
     "arithmetic_intensity": 384.94126262472156,
-    "achieved_gflops": 11823.678301979206,
-    "achieved_gbps": 30.71553883665126,
-    "latency_ms": 1.6388879995793104,
+    "achieved_gflops": 12000.913344699306,
+    "achieved_gbps": 31.175959840914672,
+    "latency_ms": 1.6146841430664063,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "transformer",
+    "config": "QKV",
+    "implementation": "Triton",
+    "flops": 7247757312,
+    "bytes": 16126464,
+    "arithmetic_intensity": 449.43251738260784,
+    "achieved_gflops": 12590.969990299613,
+    "achieved_gbps": 28.015262588533957,
+    "latency_ms": 0.5756313705444336,
     "is_memory_bound": false
   },
   {
@@ -174,9 +354,9 @@
     "flops": 7864320,
     "bytes": 6291456,
     "arithmetic_intensity": 1.25,
-    "achieved_gflops": 76.72507279428167,
-    "achieved_gbps": 61.38005823542534,
-    "latency_ms": 0.10250000050291419,
+    "achieved_gflops": 127.96400780539217,
+    "achieved_gbps": 102.37120624431375,
+    "latency_ms": 0.061457281112670896,
     "is_memory_bound": true
   },
   {
@@ -186,9 +366,9 @@
     "flops": 6291456,
     "bytes": 6294528,
     "arithmetic_intensity": 0.9995119570522206,
-    "achieved_gflops": 79.46566985855381,
-    "achieved_gbps": 79.50447145516442,
-    "latency_ms": 0.07917199982330203,
+    "achieved_gflops": 85.65005741305288,
+    "achieved_gbps": 85.69187873014909,
+    "latency_ms": 0.07345536231994629,
     "is_memory_bound": true
   },
   {
@@ -198,9 +378,81 @@
     "flops": 12582912,
     "bytes": 6291456,
     "arithmetic_intensity": 2.0,
-    "achieved_gflops": 0.0,
-    "achieved_gbps": 74.06941413467582,
-    "latency_ms": 0.0849399995058775,
+    "achieved_gflops": 232.19955599057167,
+    "achieved_gbps": 116.09977799528583,
+    "latency_ms": 0.05419007778167725,
     "is_memory_bound": true
+  },
+  {
+    "kernel": "transformer",
+    "config": "MLP",
+    "implementation": "Triton",
+    "flops": 19377684480,
+    "bytes": 50339328,
+    "arithmetic_intensity": 384.94126262472156,
+    "achieved_gflops": 11981.024967840927,
+    "achieved_gbps": 31.12429383680077,
+    "latency_ms": 1.617364501953125,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "transformer",
+    "config": "QKV",
+    "implementation": "CUDA",
+    "flops": 7247757312,
+    "bytes": 16126464,
+    "arithmetic_intensity": 449.43251738260784,
+    "achieved_gflops": 10292.71473914477,
+    "achieved_gbps": 22.901579972644583,
+    "latency_ms": 0.704163818359375,
+    "is_memory_bound": false
+  },
+  {
+    "kernel": "transformer",
+    "config": "Softmax",
+    "implementation": "CUDA",
+    "flops": 7864320,
+    "bytes": 6291456,
+    "arithmetic_intensity": 1.25,
+    "achieved_gflops": 83.02983482833281,
+    "achieved_gbps": 66.42386786266626,
+    "latency_ms": 0.094716796875,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "transformer",
+    "config": "LayerNorm",
+    "implementation": "CUDA",
+    "flops": 6291456,
+    "bytes": 6294528,
+    "arithmetic_intensity": 0.9995119570522206,
+    "achieved_gflops": 56.6267270918127,
+    "achieved_gbps": 56.65437686090049,
+    "latency_ms": 0.11110400199890137,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "transformer",
+    "config": "GELU",
+    "implementation": "CUDA",
+    "flops": 12582912,
+    "bytes": 6291456,
+    "arithmetic_intensity": 2.0,
+    "achieved_gflops": 224.72566876532738,
+    "achieved_gbps": 112.36283438266369,
+    "latency_ms": 0.055992321968078615,
+    "is_memory_bound": true
+  },
+  {
+    "kernel": "transformer",
+    "config": "MLP",
+    "implementation": "CUDA",
+    "flops": 19377684480,
+    "bytes": 50339328,
+    "arithmetic_intensity": 384.94126262472156,
+    "achieved_gflops": 11413.328295169671,
+    "achieved_gbps": 29.649532028205822,
+    "latency_ms": 1.6978118896484375,
+    "is_memory_bound": false
   }
 ]

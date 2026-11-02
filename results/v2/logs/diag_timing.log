@@ -1,0 +1,14 @@
+impl     mode         median      min      max  spread%  samples(ms)
+PyTorch  as-is        0.0601   0.0593   0.9934   1575.0  0.0593 0.0601 0.0602 0.0599 0.9934 0.0603 0.9931 0.0598
+PyTorch  preheat1s    0.0541   0.0537   0.0546      1.6  0.0546 0.0541 0.0539 0.0542 0.0540 0.0543 0.0543 0.0537
+Triton   as-is        0.4288   0.0589   0.9844   1570.8  0.0589 0.0641 0.4291 0.5036 0.9779 0.0859 0.9844 0.4285
+Triton   preheat1s    0.0581   0.0547   0.1132    107.0  0.0571 0.0715 0.0568 0.0547 0.0567 0.0590 0.0590 0.1132
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+CUDA     as-is        0.4289   0.1520   0.9871    549.2  0.3981 0.2915 0.6078 0.4293 0.4285 0.9871 0.1520 0.9840
+CUDA     preheat1s    0.0936   0.0933   0.0940      0.8  0.0936 0.0937 0.0935 0.0933 0.0940 0.0939 0.0938 0.0935
+launch floor (1x8 input, preheated):
+PyTorch  median 0.0112 ms  samples 0.0154 0.0078 0.0078 0.0209 0.0112
+Triton   median 0.0553 ms  samples 0.0545 0.0519 0.0553 0.0622 0.0696
+CUDA     median 0.0092 ms  samples 0.0095 0.0092 0.0085 0.0088 0.0126

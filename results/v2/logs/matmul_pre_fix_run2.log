@@ -1,0 +1,17 @@
+Matmul benchmark (FP16) — NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Sizes: [512, 1024, 2048]; warmup=10, repeat=50
+CSV saved: benchmarks/benchmark_matmul_results.csv
+
+--- Matmul benchmark ---
+implementation | size           | latency_ms | gflops   | memory_bandwidth_gbs | gpu_utilization_pct
+---------------+----------------+------------+----------+----------------------+--------------------
+PyTorch        | 512x512x512    | 0.0752     | 3571.44  | 20.93                |                    
+Triton         | 512x512x512    | 0.0557     | 4822.37  | 28.26                |                    
+PyTorch        | 1024x1024x1024 | 0.1695     | 12668.55 | 37.11                | 99.0               
+Triton         | 1024x1024x1024 | 0.1495     | 14364.05 | 42.08                | 99.0               
+CUDA           | 1024x1024x1024 | 0.214      | 10034.22 | 29.4                 |                    
+PyTorch        | 2048x2048x2048 | 1.2456     | 13792.52 | 20.2                 |                    
+Triton         | 2048x2048x2048 | 1.2185     | 14098.81 | 20.65                |                    
+
+Charts saved to C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\plots
+Done.

@@ -1,0 +1,18 @@
+Conv2D (3×3) benchmark (FP16) — NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Configs: [(32, 1, 28, 28, 32), (128, 1, 28, 28, 32), (128, 1, 64, 64, 64)]; warmup=10, repeat=50
+CSV saved: benchmarks/benchmark_conv_results.csv
+
+--- Conv2D benchmark ---
+implementation | config           | latency_ms | gflops | memory_bandwidth_gbs | gpu_utilization_pct
+---------------+------------------+------------+--------+----------------------+--------------------
+PyTorch        | B32_C1x32_28x28  | 0.0409     | 304.35 | 35.06                | 94.0               
+Triton         | B32_C1x32_28x28  | 0.0713     | 174.72 | 20.13                | 94.0               
+CUDA           | B32_C1x32_28x28  | 0.0352     | 354.42 | 81.65                |                    
+PyTorch        | B128_C1x32_28x28 | 0.1677     | 297.22 | 34.22                |                    
+Triton         | B128_C1x32_28x28 | 0.0832     | 599.11 | 68.99                |                    
+CUDA           | B128_C1x32_28x28 | 0.1245     | 400.33 | 92.2                 |                    
+PyTorch        | B128_C1x64_64x64 | 1.6692     | 339.58 | 38.36                |                    
+Triton         | B128_C1x64_64x64 | 1.0186     | 556.49 | 62.86                |                    
+
+Charts saved to C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\plots
+Done.

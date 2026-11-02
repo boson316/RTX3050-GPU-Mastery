@@ -1,0 +1,22 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+Attention benchmark (FP16) — NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Configs (B,H,S,D): [(2, 8, 128, 64), (4, 8, 256, 64), (2, 8, 512, 64)]; warmup=8, repeat=30
+CSV saved: benchmarks/benchmark_attention_results.csv
+
+--- Attention benchmark ---
+implementation | config         | latency_ms | gflops   | memory_bandwidth_gbs | gpu_utilization_pct
+---------------+----------------+------------+----------+----------------------+--------------------
+PyTorch        | B2_H8_S128_D64 | 0.037      | 1813.99  | 28.34                | 94.0               
+Triton         | B2_H8_S128_D64 | 0.0933     | 719.3    | 11.24                | 94.0               
+CUDA           | B2_H8_S128_D64 | 0.097      | 691.55   | 21.61                |                    
+PyTorch        | B4_H8_S256_D64 | 0.0582     | 9225.01  | 72.07                |                    
+Triton         | B4_H8_S256_D64 | 0.0637     | 8424.55  | 65.82                |                    
+CUDA           | B4_H8_S256_D64 | 0.3846     | 1395.99  | 21.81                |                    
+PyTorch        | B2_H8_S512_D64 | 0.1049     | 10236.67 | 39.99                |                    
+Triton         | B2_H8_S512_D64 | 0.0873     | 12292.8  | 48.02                |                    
+CUDA           | B2_H8_S512_D64 | 0.678      | 1583.71  | 12.37                |                    
+
+Charts saved to C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\plots
+Done.
