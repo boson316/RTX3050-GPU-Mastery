@@ -93,7 +93,7 @@ CUDA roadmap 全表見 [`cuda_roadmap/results.md`](../../cuda_roadmap/results.md
 - **Triton 版本取決於環境。** GPU 環境要用 3.2 才符合 PyTorch 2.6；沒有 GPU 時 3.2 會在 import 階段失敗，需要較新版本。
 - **CI 尚未實際跑過。** CI 用 Linux 和不鎖版本的 Triton，這裡只在 Windows 上模擬過 pytest 步驟。
 - **Nsight 沒有執行**（`ncu` 不在 PATH）。瓶頸解釋來自 roofline，不是硬體計數器。
-- **`mnist_acc_loss.png` 沒有重新產生**（全程使用 `--skip-mnist`），README 也沒有引用。
+- **MNIST 實測 98.64%，不是舊文件寫的 99%**（10 個 epoch，單次訓練，`logs/mnist.log`）。README 沒有引用這個數字。
 - **`docs/benchmarks.md` 保留舊數字**，頁首已標明是歷史紀錄。
 - **`profiling/roofline_analysis/plot_roofline.py` 只更新了 fallback 值**，這次沒有執行。
 - **量測條件。** 插電和最佳效能模式有確認；是否有其他程式佔用 GPU，只在開始時檢查過一次。
