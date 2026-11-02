@@ -97,6 +97,20 @@ What the emulator cannot do: model timing, warps-as-SIMD, memory coalescing or T
 - The CUDA roadmap used a single cold launch; it now does warm-up plus the median of 20 event-timed runs.
 - The CI ran `ruff check . || true` and `echo "file present"`, so it could never fail. It now runs ruff, the interpreter tests, an `nvcc -Werror` compile of every `.cu` file, and the emulator tests.
 
+### 13. The FlashAttention JIT build failed on current MSVC
+- **Symptom:** `attention_cuda()` returned `None` on Windows with VS 2026 (MSVC 14.50): `host_config.h(170): fatal error C1189: unsupported Microsoft Visual Studio version`.
+- **Root cause:** CUDA 12.4 rejects `_MSC_VER >= 1950` unless nvcc gets `-allow-unsupported-compiler`. `transformer_cuda.py`, `extension/setup.py` and every `build.bat` pass it; `attention_cuda.py` did not.
+- **Found by:** the first real Windows JIT build on the GPU; the v1 environment was Linux. Log: `results/v2/logs/check_extensions_fail_jit_flag.log`.
+- **Fix:** add the flag to `extra_cuda_cflags`.
+- **Test:** `test_jit_build_allows_newer_msvc` fails on the old source and needs no GPU; `test_flash_attention_cuda[*]` runs the built kernel.
+
+### 14. The documented install replaced CUDA PyTorch with a CPU build
+- **Symptom:** after following the README, `torch.cuda.is_available()` was false and `torch.__version__` was a CPU build. `tests/conftest.py` falls back to the Triton interpreter when there is no CUDA device, so a suite run in that state would pass without touching the GPU.
+- **Root cause:** `requirements.txt` lists `torchvision` unpinned. With only `torch` installed from the CUDA index, pip chose the latest PyPI `torchvision`, whose exact `torch` requirement replaced the CUDA build. Triton also has to match the PyTorch minor version.
+- **Found by:** the import check in the v2 environment setup. Log: `results/v2/logs/pip_reqs.log`.
+- **Fix:** the install docs now take `torch` and `torchvision` from the CUDA index together and pin Triton to the PyTorch minor version.
+- **Test:** none automated; this is an install-documentation fix. The exact working versions are in `results/v2/requirements-freeze.txt`.
+
 ---
 
 ## Lessons that are now enforced in code
