@@ -109,8 +109,8 @@ What the plot says:
 
 ```bash
 git clone https://github.com/boson316/RTX3050-GPU-Mastery.git && cd RTX3050-GPU-Mastery
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-pip install -r requirements.txt triton pytest nvidia-ml-py      # Windows: triton-windows
+pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt "triton==3.2.*" pytest nvidia-ml-py      # Windows: triton-windows==3.2.*
 
 pytest -q                              # kernel correctness (GPU, or CPU via TRITON_INTERPRET=1)
 tests/cuda_emulation/run_all.sh        # CUDA kernel logic on the CPU (needs g++ >= 11)

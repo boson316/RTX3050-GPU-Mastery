@@ -98,8 +98,8 @@ flowchart LR
 
 ```bash
 git clone https://github.com/boson316/RTX3050-GPU-Mastery.git && cd RTX3050-GPU-Mastery
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-pip install -r requirements.txt triton pytest nvidia-ml-py      # Windows：triton-windows
+pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt "triton==3.2.*" pytest nvidia-ml-py      # Windows：triton-windows==3.2.*
 
 pytest -q                              # kernel 正確性（GPU 上執行，或在 CPU 上用 TRITON_INTERPRET=1）
 tests/cuda_emulation/run_all.sh        # 在 CPU 上驗證 CUDA kernel 邏輯（需要 g++ >= 11）
