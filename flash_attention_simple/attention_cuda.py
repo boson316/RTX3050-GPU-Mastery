@@ -29,7 +29,7 @@ def _load_cuda_extension():
         _cuda_attention = load(
             name="flash_attention_cuda",
             sources=[str(cu_path), str(cpp_path)],
-            extra_cuda_cflags=["-O3", "--use_fast_math"],
+            extra_cuda_cflags=["-O3", "--use_fast_math", "--allow-unsupported-compiler"],
             extra_include_paths=[str(folder)],
             build_directory=str(build_dir),
             with_cuda=True,
