@@ -55,6 +55,7 @@ def _attn_fwd_inner(
     qk_scale,
     BLOCK_N: tl.constexpr,
     MASK_DIAG: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,
 ):
     d_mask = offs_d < head_dim
     for start_n in range(start_n_lo, start_n_hi, BLOCK_N):
@@ -66,7 +67,7 @@ def _attn_fwd_inner(
             other=0.0,
         )
         # qk_scale already folds in log2(e) so we can use exp2 (cheaper than exp on GPU).
-        qk = tl.dot(q, k) * qk_scale
+        qk = tl.dot(q, k, input_precision=INPUT_PRECISION) * qk_scale
         qk = tl.where(cols[None, :] < seq_len_k, qk, float("-inf"))
         if MASK_DIAG:
             qk = tl.where(offs_m[:, None] >= cols[None, :], qk, float("-inf"))
@@ -80,7 +81,7 @@ def _attn_fwd_inner(
             other=0.0,
         )
         acc = acc * alpha[:, None]
-        acc += tl.dot(p.to(v.dtype), v)
+        acc += tl.dot(p.to(v.dtype), v, input_precision=INPUT_PRECISION)
         m_i = m_ij
     return acc, l_i, m_i
 
@@ -98,6 +99,7 @@ def _fwd_kernel(
     BLOCK_N: tl.constexpr,
     BLOCK_D: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,
 ):
     # program_id(0): tile of BLOCK_M query rows; program_id(1): flattened (batch, head).
     start_m = tl.program_id(0)
@@ -134,19 +136,19 @@ def _fwd_kernel(
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_base, V_base, stride_kn, stride_vn,
             offs_m, offs_n, offs_d, lo_full, hi_full, seq_len_k, head_dim, qk_scale,
-            BLOCK_N=BLOCK_N, MASK_DIAG=False,
+            BLOCK_N=BLOCK_N, MASK_DIAG=False, INPUT_PRECISION=INPUT_PRECISION,
         )
         hi_diag = tl.minimum((start_m + 1) * BLOCK_M, seq_len_k)
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_base, V_base, stride_kn, stride_vn,
             offs_m, offs_n, offs_d, hi_full, hi_diag, seq_len_k, head_dim, qk_scale,
-            BLOCK_N=BLOCK_N, MASK_DIAG=True,
+            BLOCK_N=BLOCK_N, MASK_DIAG=True, INPUT_PRECISION=INPUT_PRECISION,
         )
     else:
         acc, l_i, m_i = _attn_fwd_inner(
             acc, l_i, m_i, q, K_base, V_base, stride_kn, stride_vn,
             offs_m, offs_n, offs_d, 0, seq_len_k, seq_len_k, head_dim, qk_scale,
-            BLOCK_N=BLOCK_N, MASK_DIAG=False,
+            BLOCK_N=BLOCK_N, MASK_DIAG=False, INPUT_PRECISION=INPUT_PRECISION,
         )
 
     # Padded rows (offs_m >= seq_len_q) have l_i == 0; guard the division, they are masked on store.
@@ -173,7 +175,7 @@ _AUTOTUNE_CONFIGS = [
 
 _fwd_kernel_autotuned = triton.autotune(
     configs=_AUTOTUNE_CONFIGS,
-    key=["seq_len_q", "seq_len_k", "head_dim", "IS_CAUSAL"],
+    key=["seq_len_q", "seq_len_k", "head_dim", "IS_CAUSAL", "INPUT_PRECISION"],
 )(_fwd_kernel)
 
 
@@ -186,8 +188,12 @@ def _check_inputs(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: boo
         assert q.shape[2] == k.shape[2], "causal attention assumes seq_len_q == seq_len_k"
 
 
-def _launch(q, k, v, causal, block_m=None, block_n=None):
+PRECISIONS = ("tf32", "ieee")
+
+
+def _launch(q, k, v, causal, block_m=None, block_n=None, precision="tf32"):
     _check_inputs(q, k, v, causal)
+    assert precision in PRECISIONS, f"precision must be one of {PRECISIONS}"
     # The kernel assumes unit stride on the last dim and a flattenable (batch, head) dim.
     q, k, v = (t.contiguous() for t in (q, k, v))
     batch, n_heads, seq_len_q, head_dim = q.shape
@@ -205,10 +211,11 @@ def _launch(q, k, v, causal, block_m=None, block_n=None):
     )
     if block_m is None:
         grid = lambda meta: (triton.cdiv(seq_len_q, meta["BLOCK_M"]), batch * n_heads)  # noqa: E731
-        _fwd_kernel_autotuned[grid](*args, BLOCK_D=block_d, IS_CAUSAL=causal)
+        _fwd_kernel_autotuned[grid](*args, BLOCK_D=block_d, IS_CAUSAL=causal, INPUT_PRECISION=precision)
     else:
         grid = (triton.cdiv(seq_len_q, block_m), batch * n_heads)
-        _fwd_kernel[grid](*args, BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_D=block_d, IS_CAUSAL=causal)
+        _fwd_kernel[grid](*args, BLOCK_M=block_m, BLOCK_N=block_n, BLOCK_D=block_d, IS_CAUSAL=causal,
+                          INPUT_PRECISION=precision)
     return out
 
 
@@ -230,16 +237,23 @@ def flash_attention_triton(
     BLOCK_M: int | None = None,
     BLOCK_N: int | None = None,
     use_autotune: bool = True,
+    precision: str = "tf32",
 ) -> torch.Tensor:
     """
     O = softmax(Q K^T / sqrt(d)) V for q, k, v of shape (batch, heads, seq, head_dim), FP16/BF16/FP32.
 
     use_autotune=True (and no explicit block sizes) autotunes BLOCK_M / BLOCK_N / num_warps / num_stages,
-    keyed on (seq_len_q, seq_len_k, head_dim, causal).
+    keyed on (seq_len_q, seq_len_k, head_dim, causal, precision).
+
+    precision only matters for FP32 inputs: "tf32" (Triton's default) runs both matmuls on Tensor
+    Cores with a 10-bit mantissa (relative error ~5e-4: fast, but not FP32-accurate); "ieee" uses
+    FP32 FMA on CUDA cores. v2 measured Triton FP32 attention 4x faster than SDPA at S=4096 with
+    ~1000x larger error - that was TF32 vs IEEE, so benchmarks now report the precision explicitly.
+    FP16/BF16 inputs always use Tensor Cores with FP32 accumulation.
     """
     if use_autotune and BLOCK_M is None and BLOCK_N is None:
-        return _launch(q, k, v, causal)
-    return _launch(q, k, v, causal, block_m=BLOCK_M or 64, block_n=BLOCK_N or 64)
+        return _launch(q, k, v, causal, precision=precision)
+    return _launch(q, k, v, causal, block_m=BLOCK_M or 64, block_n=BLOCK_N or 64, precision=precision)
 
 
 # -----------------------------------------------------------------------------

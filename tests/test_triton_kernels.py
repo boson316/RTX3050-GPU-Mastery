@@ -70,6 +70,18 @@ def test_flash_attention(device, dtype, causal, B, H, S, D, variant):
     torch.testing.assert_close(out, _sdpa_ref(q, k, v, causal), **tol(dtype))
 
 
+@pytest.mark.parametrize("precision", ["ieee", "tf32"])
+def test_flash_attention_fp32_precision(device, precision):
+    """precision="ieee" must be FP32-accurate on the GPU; "tf32" is allowed TF32 error (~5e-4 relative)."""
+    from triton_kernels.flash_attention import flash_attention_triton
+
+    q, k, v = (torch.randn(1, 2, 200, 64, device=device) for _ in range(3))
+    out = flash_attention_triton(q, k, v, BLOCK_M=64, BLOCK_N=64, precision=precision)  # interpreter: no autotune
+    ref = F.scaled_dot_product_attention(q.double(), k.double(), v.double()).float()
+    tight = precision == "ieee" or not HAS_CUDA  # the CPU interpreter computes in full FP32 either way
+    torch.testing.assert_close(out, ref, atol=1e-5 if tight else 5e-3, rtol=1e-4 if tight else 5e-3)
+
+
 @requires_cuda
 @pytest.mark.parametrize("causal", [False, True])
 def test_flash_attention_autotuned_fp16(causal):
