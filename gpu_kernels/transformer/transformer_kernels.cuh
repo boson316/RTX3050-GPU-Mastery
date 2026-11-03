@@ -6,8 +6,10 @@
  * checked on the CPU emulator in tests/cuda_emulation/.
  *
  * Kernels
- *   softmax_rows      : 1 block per row, ONLINE softmax -> 2 passes over the row instead of 3
- *   layernorm_rows    : 1 block per row, Welford mean/variance -> 2 passes instead of 3
+ *   softmax_warp      : 1 warp per row, row cached in registers, 128-bit loads (n_cols % 8 == 0, <= 1024)
+ *   layernorm_warp    : same layout, exact two-pass statistics from registers
+ *   softmax_rows      : fallback, 1 block per row, ONLINE softmax -> 2 passes over the row instead of 3
+ *   layernorm_rows    : fallback, 1 block per row, Welford mean/variance -> 2 passes instead of 3
  *   gelu              : elementwise tanh-GELU, grid-stride loop
  *   bias_gelu_rows    : fused epilogue y = GELU(y + b)  (after the first MLP GEMM)
  *   bias_rows         : fused epilogue y = y + b
@@ -156,6 +158,151 @@ __global__ void layernorm_rows_kernel(const __half* __restrict__ x, const __half
         const float g = gamma ? __half2float(gamma[i]) : 1.f;
         const float b = beta ? __half2float(beta[i]) : 0.f;
         y[row_off + i] = __float2half((__half2float(x[row_off + i]) - mu) * rstd * g + b);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Warp-per-row softmax / LayerNorm for rows of <= 1024 elements with n_cols % 8 == 0
+// (every hidden size used in practice: 768, 1024, ...).
+//
+// Why (v2 measurements, 2048 x 768 FP16): the block-per-row kernels above reached 67 GB/s
+// (softmax) and 57 GB/s (LayerNorm) vs ~115 GB/s for PyTorch on a 132 GB/s part. With one
+// 2-byte load per thread and 768-thread blocks, each SM has only ~2 rows in flight, so there
+// are too few outstanding memory requests to cover DRAM latency, and the row is read twice.
+//
+// Here one warp owns one row:
+//   - 128-bit loads (8 halves per lane per chunk); chunk c of lane l covers columns
+//     (c*32 + l)*8 .. +7, so each chunk is one fully coalesced 512-byte warp access;
+//   - the whole row stays in registers (CHUNKS*8 floats per lane), so DRAM is read once;
+//   - reductions are pure warp shuffles: no shared memory, no __syncthreads;
+//   - 4 warps (4 rows) per 128-thread block -> many independent rows in flight per SM.
+// A warp whose row is out of range returns as a whole, which is safe because the kernel
+// has no block-level barrier.
+// ---------------------------------------------------------------------------
+constexpr int WARP_ROWS_PER_BLOCK = 4;
+constexpr int VEC = 8;  // halves per 128-bit access
+
+__device__ __forceinline__ void load8(const __half* p, float v[VEC]) {
+#ifdef __CUDACC__
+    const int4 raw = *reinterpret_cast<const int4*>(p);
+    const __half2* h = reinterpret_cast<const __half2*>(&raw);
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+        const float2 f = __half22float2(h[i]);
+        v[2 * i] = f.x;
+        v[2 * i + 1] = f.y;
+    }
+#else
+    for (int i = 0; i < VEC; ++i) v[i] = __half2float(p[i]);
+#endif
+}
+
+__device__ __forceinline__ void store8(__half* p, const float v[VEC]) {
+#ifdef __CUDACC__
+    int4 raw;
+    __half2* h = reinterpret_cast<__half2*>(&raw);
+#pragma unroll
+    for (int i = 0; i < 4; ++i) h[i] = __floats2half2_rn(v[2 * i], v[2 * i + 1]);
+    *reinterpret_cast<int4*>(p) = raw;
+#else
+    for (int i = 0; i < VEC; ++i) p[i] = __float2half(v[i]);
+#endif
+}
+
+__device__ __forceinline__ float warp_max(float v) {
+    for (int off = 16; off > 0; off >>= 1) v = fmaxf(v, __shfl_xor_sync(FULL_MASK, v, off));
+    return v;
+}
+
+template <int CHUNKS>
+__global__ void __launch_bounds__(WARP_ROWS_PER_BLOCK * 32)
+softmax_warp_kernel(const __half* __restrict__ x, __half* __restrict__ y, int n_rows, int n_cols) {
+    const int lane = threadIdx.x & 31;
+    const int row = blockIdx.x * WARP_ROWS_PER_BLOCK + (threadIdx.x >> 5);
+    if (row >= n_rows) return;
+    const size_t off = static_cast<size_t>(row) * n_cols;
+
+    float v[CHUNKS][VEC];
+    float m = -INFINITY;
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c) {
+        const int col = (c * 32 + lane) * VEC;
+        if (col < n_cols) {
+            load8(x + off + col, v[c]);
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) m = fmaxf(m, v[c][e]);
+        } else {
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) v[c][e] = -INFINITY;  // exp -> 0, never stored
+        }
+    }
+    m = warp_max(m);
+    float s = 0.f;
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c)
+#pragma unroll
+        for (int e = 0; e < VEC; ++e) {
+            v[c][e] = __expf(v[c][e] - m);
+            s += v[c][e];
+        }
+    const float inv = 1.f / warp_sum(s);
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c) {
+        const int col = (c * 32 + lane) * VEC;
+        if (col < n_cols) {
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) v[c][e] *= inv;
+            store8(y + off + col, v[c]);
+        }
+    }
+}
+
+template <int CHUNKS>
+__global__ void __launch_bounds__(WARP_ROWS_PER_BLOCK * 32)
+layernorm_warp_kernel(const __half* __restrict__ x, const __half* __restrict__ gamma,
+                      const __half* __restrict__ beta, __half* __restrict__ y, int n_rows, int n_cols, float eps) {
+    const int lane = threadIdx.x & 31;
+    const int row = blockIdx.x * WARP_ROWS_PER_BLOCK + (threadIdx.x >> 5);
+    if (row >= n_rows) return;
+    const size_t off = static_cast<size_t>(row) * n_cols;
+
+    float v[CHUNKS][VEC];
+    float sum = 0.f;
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c) {
+        const int col = (c * 32 + lane) * VEC;
+        if (col < n_cols) {
+            load8(x + off + col, v[c]);
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) sum += v[c][e];
+        }
+    }
+    const float mean = warp_sum(sum) / n_cols;
+    // Exact two-pass variance from registers: no extra DRAM traffic, no cancellation.
+    float sq = 0.f;
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c) {
+        const int col = (c * 32 + lane) * VEC;
+        if (col < n_cols) {
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) {
+                const float d = v[c][e] - mean;
+                sq += d * d;
+            }
+        }
+    }
+    const float rstd = rsqrtf(warp_sum(sq) / n_cols + eps);
+#pragma unroll
+    for (int c = 0; c < CHUNKS; ++c) {
+        const int col = (c * 32 + lane) * VEC;
+        if (col < n_cols) {
+            float g[VEC], b[VEC];
+            if (gamma) load8(gamma + col, g); else for (int e = 0; e < VEC; ++e) g[e] = 1.f;
+            if (beta) load8(beta + col, b); else for (int e = 0; e < VEC; ++e) b[e] = 0.f;
+#pragma unroll
+            for (int e = 0; e < VEC; ++e) v[c][e] = (v[c][e] - mean) * rstd * g[e] + b[e];
+            store8(y + off + col, v[c]);
+        }
     }
 }
 

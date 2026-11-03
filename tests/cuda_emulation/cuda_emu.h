@@ -96,5 +96,7 @@ void emu_launch(Dim3 grid, Dim3 block, F&& kernel) {
                     });
                 }
                 for (auto& th : threads) th.join();
+                g_warps = nullptr;  // the block's barriers die at the end of this iteration
+                g_block_barrier = nullptr;
             }
 }
