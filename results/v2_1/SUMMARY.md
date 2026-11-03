@@ -123,5 +123,22 @@
 
 ## 尚未推送的 commit
 
-`git log --oneline origin/main..HEAD`，表列內容不含加入本摘要的 commit。
+`git log --oneline origin/main..HEAD`，不含補上這份清單的最後一個 commit。
 
+**RTX3050-GPU-Mastery**（分支 `claude/admiring-faraday-0w68tw`）
+
+```
+ff01b61 results: v2.1 summary with sources for every number
+38f544d docs+results: v2.1.0 measured on the RTX 3050
+546353a docs+bench: explain where custom kernels lose, TF32 vs IEEE attention, launch floor; row-wise kernels at 8192x768
+4603da4 tools: gpu_state_probe.py - correlate run-to-run clusters with P-state, clocks, power, throttle reasons
+fc040b3 feat(attention): explicit TF32/IEEE precision for Triton FlashAttention; precision-labelled long-seq benchmark
+917c036 perf(transformer): warp-per-row softmax and LayerNorm with 128-bit loads
+146149e perf(transformer): fuse bias / bias+GELU into the GEMM epilogue with cublasLt
+```
+
+**portfolio**（分支 `claude/admiring-faraday-0w68tw`）
+
+```
+f726997 GPU Lab: v2.1 numbers (CUDA softmax/LayerNorm 118 GB/s, attention by precision)
+```
