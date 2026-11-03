@@ -18,7 +18,7 @@ setup(
                 "nvcc": ["-O3", "--use_fast_math", "-arch=sm_86", "--allow-unsupported-compiler"],
                 "cxx": ["/O2"] if __import__("sys").platform == "win32" else ["-O3"],
             },
-            extra_link_args=["cublas.lib"] if __import__("sys").platform == "win32" else ["-lcublas"],
+            extra_link_args=["cublas.lib", "cublasLt.lib"] if __import__("sys").platform == "win32" else ["-lcublas", "-lcublasLt"],
         ),
     ],
     cmdclass={"build_ext": BuildExtension},

@@ -37,7 +37,7 @@ def _load_extension():
             name="_transformer_cuda_native",
             sources=[str(cu), str(cpp)],
             extra_cuda_cflags=["-O3", "--use_fast_math", "--allow-unsupported-compiler"],
-            extra_ldflags=["cublas.lib"] if sys.platform == "win32" else ["-lcublas"],
+            extra_ldflags=["cublas.lib", "cublasLt.lib"] if sys.platform == "win32" else ["-lcublas", "-lcublasLt"],
             build_directory=str(build_dir),
             with_cuda=True,
         )

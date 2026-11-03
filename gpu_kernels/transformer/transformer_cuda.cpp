@@ -1,14 +1,14 @@
 /*
  * PyTorch bindings for the transformer CUDA kernels (FP16).
  *
- * GEMMs (QKV projection, MLP) use cuBLAS through ATen's per-stream handle.
+ * GEMMs (QKV projection, MLP) use cublasLt with bias / bias+GELU fused into the GEMM epilogue.
  *
  * Row-major GEMM with column-major cuBLAS:
  *   We want Y (M x N) = X (M x K) @ W (K x N), all row-major.
  *   A row-major matrix is the transpose of the same buffer read column-major, so
  *   Y^T (N x M) = W^T (N x K) @ X^T (K x M) where W^T is just `w` with ld = N and
  *   X^T is `x` with ld = K. One cublasGemmEx(N, N, m=N, n=M, k=K) writes row-major Y
- *   directly - no transpose kernel, no temp buffer.
+ *   directly - no transpose kernel, no temp buffer. cublasLt uses the same column-major view.
  *
  *   The previous version called cublasGemmEx(T, N, M, N, K, x, K, w, N, ...), i.e. it
  *   read `w` as a column-major K x N matrix with ld = N. For the QKV shape (N = 3K) that
@@ -19,8 +19,12 @@
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <cublasLt.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
+
+#include <mutex>
+#include <unordered_map>
 #include <cuda_runtime.h>
 
 extern "C" {
@@ -48,21 +52,89 @@ namespace {
 inline const __half* hptr(const torch::Tensor& t) { return reinterpret_cast<const __half*>(t.data_ptr<at::Half>()); }
 inline __half* hptr_mut(torch::Tensor& t) { return reinterpret_cast<__half*>(t.data_ptr<at::Half>()); }
 
-// y (M x N, row-major) = x (M x K) @ w (K x N); FP16 in/out, FP32 accumulate, Tensor Cores allowed.
-void gemm_rowmajor_fp16(const torch::Tensor& x, const torch::Tensor& w, torch::Tensor& y) {
-    const int M = x.size(0), K = x.size(1), N = w.size(1);
+// ---------------------------------------------------------------------------------------------
+// cublasLt GEMM with a fused epilogue: y = act(x @ w + b), all row-major FP16, FP32 accumulate.
+//
+// Why: v2 measurements showed QKV 0.675 ms vs PyTorch 0.545 ms. The whole 0.13 ms gap is the
+// separate bias kernel, which re-reads and re-writes the 2048 x 2304 FP16 output (18.9 MB at
+// 132 GB/s = 0.14 ms). cublasLt applies bias (and GELU) in the GEMM epilogue while the tile is
+// still in registers, the same thing PyTorch's addmm does - so the extra DRAM pass disappears.
+//
+// Row-major trick (see the file header): column-major D (N x M) = W (N x K) * X (K x M);
+// the bias vector runs along D's rows, i.e. over the N output features, as required.
+// CUBLASLT_EPILOGUE_GELU_BIAS applies cuBLAS's GELU (an approximation; it differs from the exact
+// erf form by < 1e-3, well inside FP16 tolerance). tests/test_cuda_extensions.py checks it on the GPU.
+// ---------------------------------------------------------------------------------------------
+#define CHECK_LT(expr)                                                                   \
+    do {                                                                                 \
+        cublasStatus_t _s = (expr);                                                      \
+        TORCH_CHECK(_s == CUBLAS_STATUS_SUCCESS, #expr " failed with status ", static_cast<int>(_s)); \
+    } while (0)
+
+cublasLtHandle_t lt_handle() {
+    // One handle per device, created lazily. cublasLt handles are not tied to a stream.
+    static std::mutex mu;
+    static std::unordered_map<int, cublasLtHandle_t> handles;
+    int dev = 0;
+    cudaGetDevice(&dev);
+    std::lock_guard<std::mutex> lock(mu);
+    auto it = handles.find(dev);
+    if (it != handles.end()) return it->second;
+    cublasLtHandle_t h = nullptr;
+    CHECK_LT(cublasLtCreate(&h));
+    handles[dev] = h;
+    return h;
+}
+
+struct LtDescs {  // RAII for the cublasLt descriptors of one call
+    cublasLtMatmulDesc_t op = nullptr;
+    cublasLtMatrixLayout_t a = nullptr, b = nullptr, d = nullptr;
+    cublasLtMatmulPreference_t pref = nullptr;
+    ~LtDescs() {
+        if (pref) cublasLtMatmulPreferenceDestroy(pref);
+        if (d) cublasLtMatrixLayoutDestroy(d);
+        if (b) cublasLtMatrixLayoutDestroy(b);
+        if (a) cublasLtMatrixLayoutDestroy(a);
+        if (op) cublasLtMatmulDescDestroy(op);
+    }
+};
+
+void gemm_bias_act_lt(const torch::Tensor& x, const torch::Tensor& w, const __half* bias, bool gelu,
+                      torch::Tensor& y) {
+    const int64_t M = x.size(0), K = x.size(1), N = w.size(1);
     const float alpha = 1.f, beta = 0.f;
-    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();  // already bound to the current stream
-    const cublasStatus_t st = cublasGemmEx(
-        handle, CUBLAS_OP_N, CUBLAS_OP_N,
-        /*m=*/N, /*n=*/M, /*k=*/K,
-        &alpha,
-        hptr(w), CUDA_R_16F, /*lda=*/N,
-        hptr(x), CUDA_R_16F, /*ldb=*/K,
-        &beta,
-        hptr_mut(y), CUDA_R_16F, /*ldc=*/N,
-        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
-    TORCH_CHECK(st == CUBLAS_STATUS_SUCCESS, "cublasGemmEx failed with status ", static_cast<int>(st));
+    LtDescs d;
+    CHECK_LT(cublasLtMatmulDescCreate(&d.op, CUBLAS_COMPUTE_32F, CUDA_R_32F));
+    const cublasOperation_t no_trans = CUBLAS_OP_N;
+    CHECK_LT(cublasLtMatmulDescSetAttribute(d.op, CUBLASLT_MATMUL_DESC_TRANSA, &no_trans, sizeof(no_trans)));
+    CHECK_LT(cublasLtMatmulDescSetAttribute(d.op, CUBLASLT_MATMUL_DESC_TRANSB, &no_trans, sizeof(no_trans)));
+    cublasLtEpilogue_t epi = gelu ? (bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU)
+                                  : (bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT);
+    CHECK_LT(cublasLtMatmulDescSetAttribute(d.op, CUBLASLT_MATMUL_DESC_EPILOGUE, &epi, sizeof(epi)));
+    if (bias) {
+        const cudaDataType_t bias_type = CUDA_R_16F;
+        CHECK_LT(cublasLtMatmulDescSetAttribute(d.op, CUBLASLT_MATMUL_DESC_BIAS_POINTER, &bias, sizeof(bias)));
+        CHECK_LT(cublasLtMatmulDescSetAttribute(d.op, CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_type,
+                                                sizeof(bias_type)));
+    }
+    // Column-major views of the row-major buffers: W -> N x K (ld N), X -> K x M (ld K), Y -> N x M (ld N).
+    CHECK_LT(cublasLtMatrixLayoutCreate(&d.a, CUDA_R_16F, N, K, N));
+    CHECK_LT(cublasLtMatrixLayoutCreate(&d.b, CUDA_R_16F, K, M, K));
+    CHECK_LT(cublasLtMatrixLayoutCreate(&d.d, CUDA_R_16F, N, M, N));
+
+    // Workspace from PyTorch's caching allocator (no cudaMalloc per call).
+    size_t ws_size = 4u << 20;
+    auto ws = torch::empty({static_cast<int64_t>(ws_size)}, x.options().dtype(torch::kUInt8));
+    CHECK_LT(cublasLtMatmulPreferenceCreate(&d.pref));
+    CHECK_LT(cublasLtMatmulPreferenceSetAttribute(d.pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &ws_size,
+                                                  sizeof(ws_size)));
+    cublasLtMatmulHeuristicResult_t heur{};
+    int found = 0;
+    cublasLtHandle_t h = lt_handle();
+    CHECK_LT(cublasLtMatmulAlgoGetHeuristic(h, d.op, d.a, d.b, d.d, d.d, d.pref, 1, &heur, &found));
+    TORCH_CHECK(found > 0, "cublasLt found no algorithm for this GEMM + epilogue");
+    CHECK_LT(cublasLtMatmul(h, d.op, &alpha, hptr(w), d.a, hptr(x), d.b, &beta, hptr_mut(y), d.d, hptr_mut(y), d.d,
+                            &heur.algo, ws.data_ptr(), ws_size, at::cuda::getCurrentCUDAStream()));
 }
 
 void check_bias(const c10::optional<torch::Tensor>& b, int64_t n) {
@@ -84,10 +156,7 @@ torch::Tensor fused_qkv_cuda(torch::Tensor x, torch::Tensor w, c10::optional<tor
     check_bias(b, w.size(1));
     const at::cuda::CUDAGuard guard(x.device());
     auto y = torch::empty({x.size(0), w.size(1)}, x.options());
-    gemm_rowmajor_fp16(x, w, y);
-    if (opt_ptr(b))
-        CHECK_LAUNCH(bias_act_fp16_launch(hptr_mut(y), opt_ptr(b), y.size(0), y.size(1), false,
-                                          at::cuda::getCurrentCUDAStream()));
+    gemm_bias_act_lt(x, w, opt_ptr(b), /*gelu=*/false, y);  // bias fused into the GEMM epilogue
     return y;
 }
 
@@ -131,21 +200,19 @@ torch::Tensor fused_mlp_cuda(torch::Tensor x, torch::Tensor w1, torch::Tensor b1
     check_bias(b1, w1.size(1));
     check_bias(b2, w2.size(1));
     const at::cuda::CUDAGuard guard(x.device());
-    auto stream = at::cuda::getCurrentCUDAStream();
+    // 2 launches total: GEMM + fused bias+GELU, then GEMM + fused bias.
     auto mid = torch::empty({x.size(0), w1.size(1)}, x.options());
-    gemm_rowmajor_fp16(x, w1, mid);
-    CHECK_LAUNCH(bias_act_fp16_launch(hptr_mut(mid), hptr(b1), mid.size(0), mid.size(1), true, stream));
+    gemm_bias_act_lt(x, w1, opt_ptr(b1), /*gelu=*/true, mid);
     auto out = torch::empty({x.size(0), w2.size(1)}, x.options());
-    gemm_rowmajor_fp16(mid, w2, out);
-    CHECK_LAUNCH(bias_act_fp16_launch(hptr_mut(out), hptr(b2), out.size(0), out.size(1), false, stream));
+    gemm_bias_act_lt(mid, w2, opt_ptr(b2), /*gelu=*/false, out);
     return out;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("fused_qkv", &fused_qkv_cuda, "QKV projection y = x @ w + b (cuBLAS + bias epilogue, FP16)",
+    m.def("fused_qkv", &fused_qkv_cuda, "QKV projection y = x @ w + b (cublasLt, bias fused into the GEMM epilogue, FP16)",
           py::arg("x"), py::arg("w"), py::arg("b") = py::none());
     m.def("softmax", &softmax_cuda, "Online softmax over last dim (FP16)");
     m.def("layernorm", &layernorm_cuda, "LayerNorm, Welford statistics (FP16)");
     m.def("gelu", &gelu_cuda, "tanh-GELU (FP16)");
-    m.def("fused_mlp", &fused_mlp_cuda, "MLP: GEMM -> fused bias+GELU -> GEMM -> bias (FP16)");
+    m.def("fused_mlp", &fused_mlp_cuda, "MLP: cublasLt GEMM+bias+GELU epilogue -> GEMM+bias epilogue (FP16, 2 launches)");
 }
