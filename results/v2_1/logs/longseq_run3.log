@@ -1,0 +1,22 @@
+{'S': 1024, 'precision': 'fp16', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '3.642e-04', 'peak_extra_mib': 1.0, 'verified': 'PASS', 'latency_ms': 0.2104, 'tflops': 10.21}
+{'S': 1024, 'precision': 'fp32', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '1.104e-06', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 1.3267, 'tflops': 1.62}
+{'S': 1024, 'precision': 'fp16', 'impl': 'Triton', 'max_abs_err_vs_fp64': '3.642e-04', 'peak_extra_mib': 1.0, 'verified': 'PASS', 'latency_ms': 0.174, 'tflops': 12.34}
+{'S': 1024, 'precision': 'fp32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '9.730e-07', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 1.4936, 'tflops': 1.44}
+{'S': 1024, 'precision': 'tf32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '1.367e-03', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 0.3652, 'tflops': 5.88}
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+{'S': 1024, 'precision': 'fp32', 'impl': 'CUDA', 'max_abs_err_vs_fp64': '8.538e-07', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 1.2909, 'tflops': 1.66}
+{'S': 2048, 'precision': 'fp16', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '2.649e-04', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 0.7707, 'tflops': 11.15}
+{'S': 2048, 'precision': 'fp32', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '7.772e-07', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 4.7688, 'tflops': 1.8}
+{'S': 2048, 'precision': 'fp16', 'impl': 'Triton', 'max_abs_err_vs_fp64': '2.649e-04', 'peak_extra_mib': 2.0, 'verified': 'PASS', 'latency_ms': 0.6209, 'tflops': 13.84}
+{'S': 2048, 'precision': 'fp32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '4.165e-07', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 5.7543, 'tflops': 1.49}
+{'S': 2048, 'precision': 'tf32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '1.767e-03', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 1.3609, 'tflops': 6.31}
+{'S': 2048, 'precision': 'fp32', 'impl': 'CUDA', 'max_abs_err_vs_fp64': '5.634e-07', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 4.9137, 'tflops': 1.75}
+{'S': 4096, 'precision': 'fp16', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '1.029e-04', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 3.2996, 'tflops': 10.41}
+{'S': 4096, 'precision': 'fp32', 'impl': 'SDPA', 'max_abs_err_vs_fp64': '4.184e-07', 'peak_extra_mib': 8.0, 'verified': 'PASS', 'latency_ms': 20.3795, 'tflops': 1.69}
+{'S': 4096, 'precision': 'fp16', 'impl': 'Triton', 'max_abs_err_vs_fp64': '1.029e-04', 'peak_extra_mib': 4.0, 'verified': 'PASS', 'latency_ms': 2.4643, 'tflops': 13.94}
+{'S': 4096, 'precision': 'fp32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '4.313e-07', 'peak_extra_mib': 8.0, 'verified': 'PASS', 'latency_ms': 21.3275, 'tflops': 1.61}
+{'S': 4096, 'precision': 'tf32', 'impl': 'Triton', 'max_abs_err_vs_fp64': '5.593e-04', 'peak_extra_mib': 8.0, 'verified': 'PASS', 'latency_ms': 5.2669, 'tflops': 6.52}
+{'S': 4096, 'precision': 'fp32', 'impl': 'CUDA', 'max_abs_err_vs_fp64': '5.905e-07', 'peak_extra_mib': 8.0, 'verified': 'PASS', 'latency_ms': 17.6151, 'tflops': 1.95}
+CSV: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\results\v2_1\csv\run3\benchmark_attention_longseq_results.csv

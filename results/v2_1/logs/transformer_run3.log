@@ -1,0 +1,34 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+Transformer kernels (FP16) on NVIDIA GeForce RTX 3050 6GB Laptop GPU: B=8 S=256 H=768, CUDA ext: True
+
+--- Transformer kernels (verified) ---
+kernel             | implementation | latency_ms | gflops  | memory_bandwidth_gbs
+-------------------+----------------+------------+---------+---------------------
+QKV                | PyTorch        | 0.5793     | 12512.3 | 27.8                
+QKV                | Triton         | 0.6092     | 11897.6 | 26.5                
+QKV                | CUDA           | 0.6089     | 11902.1 | 26.5                
+Softmax            | PyTorch        | 0.0542     | None    | 116.0               
+Softmax            | Triton         | 0.0566     | None    | 111.1               
+Softmax            | CUDA           | 0.0536     | None    | 117.3               
+LayerNorm          | PyTorch        | 0.0564     | None    | 111.7               
+LayerNorm          | Triton         | 0.0675     | None    | 93.2                
+LayerNorm          | CUDA           | 0.0536     | None    | 117.5               
+GELU               | PyTorch        | 0.0557     | None    | 113.0               
+GELU               | Triton         | 0.0539     | None    | 116.7               
+GELU               | CUDA           | 0.0562     | None    | 111.9               
+Softmax@8192x768   | PyTorch        | 0.2075     | None    | 121.3               
+Softmax@8192x768   | Triton         | 0.2259     | None    | 111.4               
+Softmax@8192x768   | CUDA           | 0.2067     | None    | 121.8               
+LayerNorm@8192x768 | PyTorch        | 0.2138     | None    | 117.7               
+LayerNorm@8192x768 | Triton         | 0.211      | None    | 119.3               
+LayerNorm@8192x768 | CUDA           | 0.2067     | None    | 121.7               
+GELU@8192x768      | PyTorch        | 0.2086     | None    | 120.6               
+GELU@8192x768      | Triton         | 0.2079     | None    | 121.1               
+GELU@8192x768      | CUDA           | 0.2139     | None    | 117.6               
+MLP                | PyTorch        | 1.6406     | 11780.4 | 9.6                 
+MLP                | Triton         | 1.6222     | 11914.4 | 9.7                 
+MLP                | CUDA           | 1.6028     | 12058.5 | 9.8                 
+
+CSV: benchmarks/benchmark_transformer_results.csv, charts: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\benchmarks\plots

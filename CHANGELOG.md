@@ -1,30 +1,22 @@
 # Changelog
 
-## Unreleased (v2.1) - code done, GPU re-measurement pending
+## v2.1.0
 
-Follow-ups from analysing the v2.0.0 measurements. The kernels pass the CPU emulator and the
-interpreter tests; the speed claims below are expectations until re-measured on the GPU.
+Follow-ups from analysing the v2.0.0 measurements, measured on the same RTX 3050 (3 rounds; raw logs and CSVs in `results/v2_1/`, summary in `results/v2_1/SUMMARY.md`).
+
+Conditions differ from v2.0: background apps held 532-551 MiB on the GPU at idle. Unchanged PyTorch rows are the control: softmax, LayerNorm and GELU moved by at most 0.4 %, QKV by +6.3 %, MLP by +1.8 %.
 
 ### Performance
-- **QKV / MLP:** bias and bias+GELU fused into the GEMM epilogue with cublasLt. v2.0's QKV gap to
-  PyTorch (0.13 ms) equals the cost of the separate bias pass (18.9 MB at 132 GB/s), so the expected
-  result is parity with PyTorch.
-- **Softmax / LayerNorm (CUDA):** new warp-per-row path for n_cols % 8 == 0 and n_cols <= 1024:
-  128-bit loads, row held in registers (one DRAM read), shuffle-only reductions, 4 rows per block.
-  v2.0 measured 67 / 57 GB/s against ~115 GB/s for PyTorch.
+- **Softmax / LayerNorm (CUDA):** new warp-per-row path for n_cols % 8 == 0 and n_cols <= 1024: 128-bit loads, row held in registers (one DRAM read), shuffle-only reductions, 4 rows per block. 67 / 57 GB/s to 118 / 118 GB/s; target of 100 GB/s met. Against PyTorch in the same round: softmax 1.1-1.8 % faster, LayerNorm 5.0-5.9 % faster.
+- **QKV / MLP (CUDA):** bias and bias+GELU fused into the GEMM epilogue with cublasLt. MLP went from 1.1-6.0 % slower than PyTorch to 1.4-2.3 % faster. QKV's gap fell from 23.8-27.4 % to 1.1-9.9 %, 0.609 ms median vs 0.675 ms in v2.0: much closer, but the 0.545 ms target was not reached and CUDA was slower in all 3 rounds.
 
 ### Measurement
-- **Attention precision made explicit:** `flash_attention_triton(precision="tf32" | "ieee")`, and
-  `benchmarks/benchmark_attention_longseq.py` reports FP16, IEEE FP32 and TF32 separately with the
-  error vs FP64. v2.0's "Triton 4x faster with 1000x the error" was TF32 vs IEEE FP32.
-- **Row-wise kernels at two sizes:** `benchmark_transformer.py` also runs softmax / LayerNorm / GELU
-  at 8192x768, because at 2048x768 Triton sits on its ~0.055 ms launch floor.
-- **`tools/gpu_state_probe.py`:** records P-state, clocks, power and NVML throttle reasons per run to
-  explain the 1024³ WMMA two-cluster behaviour.
+- **Attention precision made explicit:** `flash_attention_triton(precision="tf32" | "ieee")`, and `benchmarks/benchmark_attention_longseq.py` reports FP16, IEEE FP32 and TF32 separately with the error vs FP64. Triton IEEE error is 4.2e-07 to 9.7e-07. In FP16, Triton is 18-26 % faster than SDPA at equal error. In IEEE FP32, CUDA is 13.7 % faster than SDPA at S = 4096 (17.6 vs 20.4 ms). v2.0's "Triton 4x faster" was TF32 vs IEEE: the same kernel is 4.1-4.2x slower in IEEE mode. TF32 is 2.1-2.2x slower than FP16 with a larger error.
+- **Row-wise kernels at two sizes:** `benchmark_transformer.py` also runs softmax / LayerNorm / GELU at 8192x768, because at 2048x768 Triton sits on its ~0.055 ms launch floor. There Triton is within 2.6 % of CUDA on all three, at 117-122 GB/s.
+- **`tools/gpu_state_probe.py`:** records P-state, clocks, power and NVML throttle reasons per run. On the 1024³ WMMA spread: no recorded variable separates slow from fast runs, and cuBLAS in the same process does not slow down with WMMA (r = -0.36), against v2.0's whole-run GPU state theory. The cause is still unknown; 20 ms sampling cannot see a 0.2 ms kernel. No clusters at 2048³.
 
 ### Tests
-- 12 new CPU-emulator cases for the warp-per-row kernels; GPU tests for both softmax/LayerNorm paths,
-  odd-shaped and bias-free cublasLt GEMMs, and Triton attention in IEEE vs TF32.
+- 12 new CPU-emulator cases for the warp-per-row kernels; GPU tests for both softmax/LayerNorm paths, odd-shaped and bias-free cublasLt GEMMs, and Triton attention in IEEE vs TF32. pytest on the GPU: 129 / 129. CPU emulator: 39 / 39.
 
 ## v2.0.0
 

@@ -1,0 +1,19 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+kineto_available: True
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+       aten::empty_like        58.49%     410.747us        90.95%     638.716us     319.358us     294.000us        43.88%     547.000us     273.500us             2  
+    aten::empty_strided        32.46%     227.969us        32.46%     227.969us     113.985us     253.000us        37.76%     253.000us     126.500us             2  
+            aten::randn         3.30%      23.198us         7.96%      55.893us      55.893us      18.000us         2.69%     114.000us     114.000us             1  
+          aten::normal_         3.66%      25.696us         3.66%      25.696us      25.696us      86.000us        12.84%      86.000us      86.000us             1  
+            aten::empty         2.09%      14.698us         2.09%      14.698us       4.899us      19.000us         2.84%      19.000us       6.333us             3  
+-----------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 702.308us
+Self CUDA time total: 670.000us
+
+event names: ['aten::empty', 'aten::empty_like', 'aten::empty_strided', 'aten::normal_', 'aten::randn']
+MLP max_abs_err vs GELU approximate='tanh': 1.552e-03
+MLP max_abs_err vs GELU approximate='none': 1.643e-03

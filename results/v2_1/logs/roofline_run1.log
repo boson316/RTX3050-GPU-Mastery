@@ -1,0 +1,10 @@
+C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+Roofline analysis — NVIDIA GeForce RTX 3050 6GB Laptop GPU
+Peak: 21504 GFLOPS, 132 GB/s, Ridge AI = 162.9 FLOP/byte
+Running kernels...
+CSV saved: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\profiling\roofline\roofline_results.csv
+JSON saved: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\profiling\roofline\roofline_results.json
+Plot saved: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\profiling\roofline\roofline_plot.png
+Done.

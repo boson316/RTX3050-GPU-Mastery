@@ -1,0 +1,17 @@
+........................................................................ [ 55%]
+.........................................................                [100%]
+============================== warnings summary ===============================
+tests/test_cuda_extensions.py::test_flash_attention_cuda[100-False]
+tests/test_cuda_extensions.py::test_fused_qkv_cuda
+  C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\.venv\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+  If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 5 durations =============================
+15.84s call     tests/test_cuda_extensions.py::test_flash_attention_cuda[100-False]
+15.12s call     tests/test_bench_timing.py::test_latency_is_stable_after_idle
+12.73s call     tests/test_cuda_extensions.py::test_fused_qkv_cuda
+4.20s call     tests/test_triton_kernels.py::test_flash_attention_autotuned_fp16[True]
+3.24s call     tests/test_triton_kernels.py::test_flash_attention_autotuned_fp16[False]
+129 passed, 2 warnings in 82.64s (0:01:22)

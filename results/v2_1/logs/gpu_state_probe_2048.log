@@ -1,0 +1,14 @@
+NVIDIA GeForce RTX 3050 6GB Laptop GPU: 10 runs of fp16_2048.exe, sampling every 20 ms
+  run  1: WMMA_TILED_GFLOPS=  10901.4  CUBLAS=  14413.4     P0  SM 1215.0 MHz  MEM 5501.0 MHz  35.0 W  66.0 C  throttle=sw_power_cap
+  run  2: WMMA_TILED_GFLOPS=  11642.8  CUBLAS=  14315.0  P0/P3/P8  SM 1260.0 MHz  MEM 5001.0 MHz  34.0 W  66.0 C  throttle=sw_power_cap+sw_thermal
+  run  3: WMMA_TILED_GFLOPS=  11389.8  CUBLAS=  14019.7     P0  SM 1297.0 MHz  MEM 5501.0 MHz  38.5 W  67.5 C  throttle=sw_power_cap
+  run  4: WMMA_TILED_GFLOPS=  11792.4  CUBLAS=  14331.1     P0  SM 1319.5 MHz  MEM 5501.0 MHz  39.0 W  66.5 C  throttle=sw_power_cap
+  run  5: WMMA_TILED_GFLOPS=  11627.1  CUBLAS=  14327.3     P0  SM 1417 MHz  MEM 5501 MHz  44.0 W  67 C  throttle=sw_power_cap
+  run  6: WMMA_TILED_GFLOPS=  11765.2  CUBLAS=  14169.9     P0  SM 1226.0 MHz  MEM 5501.0 MHz  36.6 W  66.0 C  throttle=sw_power_cap
+  run  7: WMMA_TILED_GFLOPS=  11088.7  CUBLAS=  14005.5     P0  SM 1327.0 MHz  MEM 5501.0 MHz  35.8 W  67.0 C  throttle=sw_power_cap
+  run  8: WMMA_TILED_GFLOPS=  11118.1  CUBLAS=  14327.6     P0  SM 1357 MHz  MEM 5501 MHz  38.2 W  67 C  throttle=sw_power_cap
+  run  9: WMMA_TILED_GFLOPS=  11675.2  CUBLAS=  14354.8     P0  SM 1395 MHz  MEM 5501 MHz  42.8 W  67 C  throttle=sw_power_cap
+  run 10: WMMA_TILED_GFLOPS=  11724.1  CUBLAS=  14242.1     P0  SM 1410.0 MHz  MEM 5501.0 MHz  43.0 W  66.0 C  throttle=sw_power_cap
+
+CSV: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\results\v2_1\gpu_state_probe_fp16_2048.csv
+no clear clusters on WMMA_TILED_GFLOPS (largest gap 272, range 10901-11792)

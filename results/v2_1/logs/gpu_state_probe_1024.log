@@ -1,0 +1,40 @@
+NVIDIA GeForce RTX 3050 6GB Laptop GPU: 20 runs of fp16_matmul_bench.exe, sampling every 20 ms
+  run  1: WMMA_TILED_GFLOPS=   9362.3  CUBLAS=  11173.6     P3  SM 1747 MHz  MEM 5001 MHz  24.5 W  66 C  throttle=sw_power_cap+sw_thermal
+  run  2: WMMA_TILED_GFLOPS=  10435.2  CUBLAS=  11397.6  P0/P5  SM 990 MHz  MEM 5501 MHz  7.4 W  65 C  throttle=none
+  run  3: WMMA_TILED_GFLOPS=   7443.3  CUBLAS=  11118.1  P0/P5  SM 990 MHz  MEM 5501 MHz  10.6 W  65 C  throttle=none
+  run  4: WMMA_TILED_GFLOPS=  10591.7  CUBLAS=   9198.0     P0  SM 990.0 MHz  MEM 5501.0 MHz  7.4 W  65.0 C  throttle=none
+  run  5: WMMA_TILED_GFLOPS=   9078.6  CUBLAS=  11231.6  P0/P3  SM 990 MHz  MEM 5501 MHz  7.4 W  65 C  throttle=none
+  run  6: WMMA_TILED_GFLOPS=   7570.9  CUBLAS=  11155.1     P0  SM 990.0 MHz  MEM 5501.0 MHz  10.2 W  65.0 C  throttle=none
+  run  7: WMMA_TILED_GFLOPS=   7626.0  CUBLAS=  11214.7  P0/P3  SM 990 MHz  MEM 5501 MHz  7.5 W  66 C  throttle=sw_power_cap+sw_thermal
+  run  8: WMMA_TILED_GFLOPS=   8490.5  CUBLAS=  10433.6  P0/P3  SM 990.0 MHz  MEM 5501.0 MHz  7.7 W  65.0 C  throttle=sw_power_cap+sw_thermal
+  run  9: WMMA_TILED_GFLOPS=   9848.7  CUBLAS=   9892.2  P0/P3  SM 990.0 MHz  MEM 5001.0 MHz  6.9 W  65.0 C  throttle=sw_power_cap+sw_thermal
+  run 10: WMMA_TILED_GFLOPS=  10538.5  CUBLAS=  11275.0     P0  SM 990.0 MHz  MEM 5501.0 MHz  7.5 W  65.0 C  throttle=none
+  run 11: WMMA_TILED_GFLOPS=   9892.2  CUBLAS=  11328.3     P0  SM 990.0 MHz  MEM 5501.0 MHz  8.7 W  65.0 C  throttle=none
+  run 12: WMMA_TILED_GFLOPS=  10430.3  CUBLAS=  11037.6     P0  SM 990 MHz  MEM 5501 MHz  9.1 W  65 C  throttle=none
+  run 13: WMMA_TILED_GFLOPS=  10295.9  CUBLAS=   8974.2     P0  SM 990 MHz  MEM 5501 MHz  7.6 W  65 C  throttle=none
+  run 14: WMMA_TILED_GFLOPS=   7570.9  CUBLAS=  10343.5     P0  SM 990.0 MHz  MEM 5501.0 MHz  9.0 W  65.0 C  throttle=none
+  run 15: WMMA_TILED_GFLOPS=   9986.4  CUBLAS=   9279.4     P0  SM 1365 MHz  MEM 5501 MHz  10.9 W  66 C  throttle=none
+  run 16: WMMA_TILED_GFLOPS=   7570.9  CUBLAS=  11214.7     P0  SM 990.0 MHz  MEM 5501.0 MHz  7.3 W  64.0 C  throttle=none
+  run 17: WMMA_TILED_GFLOPS=  10485.8  CUBLAS=  10446.6     P0  SM 990 MHz  MEM 5501 MHz  11.8 W  64 C  throttle=none
+  run 18: WMMA_TILED_GFLOPS=   7549.7  CUBLAS=  11349.4  P0/P5  SM 390 MHz  MEM 810 MHz  9.5 W  64 C  throttle=none
+  run 19: WMMA_TILED_GFLOPS=  10699.8  CUBLAS=  10988.8  P0/P5  SM 337 MHz  MEM 810 MHz  11.6 W  64 C  throttle=none
+  run 20: WMMA_TILED_GFLOPS=   7410.4  CUBLAS=  11037.6  P0/P3/P5  SM 990.0 MHz  MEM 5001.0 MHz  6.8 W  64.0 C  throttle=none
+
+CSV: C:\Users\User\Documents\code\cursor\RTX3050-GPU-Mastery-v2\results\v2_1\gpu_state_probe_fp16_matmul_bench.csv
+
+clusters on WMMA_TILED_GFLOPS (split at 8058):
+                            slow          fast
+runs                           7            13
+WMMA_TILED_GFLOPS         7570.9       10295.9
+CUBLAS_GFLOPS            11155.1       10988.8
+sm_mhz_median              990.0         990.0
+sm_mhz_min                 990.0         990.0
+mem_mhz_median            5501.0        5501.0
+power_w_median               9.0           7.7
+temp_c_median               65.0          65.0
+pstates             slow: P0, P0/P3, P0/P3/P5, P0/P5
+                    fast: P0, P0/P3, P0/P5, P3
+throttle            slow: none, sw_power_cap+sw_thermal
+                    fast: none, sw_power_cap+sw_thermal
+
+Read it as: the row whose values differ between the two columns is the cause (e.g. mem_mhz lower + P2 in 'slow' -> memory P-state; sw_power_cap only in 'slow' -> power limit).

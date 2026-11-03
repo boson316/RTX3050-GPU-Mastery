@@ -1,0 +1,28 @@
+=== fp16_matmul_bench: 20 runs
+sorted WMMA_TILED_GFLOPS: 7410 7443 7550 7571 7571 7571 7626 8490 9079 9362 9849 9892 9986 10296 10430 10435 10486 10538 10592 10700
+WMMA tiled ms: median 0.223712
+samples per run: median 31.0 wall_s median 0.96
+r(WMMA_TILED_GFLOPS, CUBLAS_GFLOPS) = -0.36
+r(WMMA_TILED_GFLOPS, WMMA_NAIVE_GFLOPS) = +0.99
+r(WMMA_TILED_GFLOPS, CUDA_CORE_GFLOPS) = +0.10
+r(WMMA_TILED_GFLOPS, sm_mhz_median) = +0.06
+r(WMMA_TILED_GFLOPS, mem_mhz_median) = +0.02
+r(WMMA_TILED_GFLOPS, power_w_median) = +0.08
+r(WMMA_TILED_GFLOPS, temp_c_median) = +0.10
+all four kernels verified in every run: True
+=== fp16_2048: 10 runs
+sorted WMMA_TILED_GFLOPS: 10901 11089 11118 11390 11627 11643 11675 11724 11765 11792
+WMMA tiled ms: median 1.476576
+samples per run: median 34.0 wall_s median 5.01
+r(WMMA_TILED_GFLOPS, CUBLAS_GFLOPS) = +0.09
+r(WMMA_TILED_GFLOPS, WMMA_NAIVE_GFLOPS) = +0.95
+r(WMMA_TILED_GFLOPS, CUDA_CORE_GFLOPS) = +0.61
+r(WMMA_TILED_GFLOPS, sm_mhz_median) = +0.28
+r(WMMA_TILED_GFLOPS, mem_mhz_median) = -0.18
+r(WMMA_TILED_GFLOPS, power_w_median) = +0.47
+r(WMMA_TILED_GFLOPS, temp_c_median) = -0.21
+all four kernels verified in every run: True
+
+1024: median sampled SM clock 990 MHz allows 10136 GFLOPS; fastest cuBLAS run measured 11397.6, needing at least 1113 MHz
+1024: cuBLAS median in slow-WMMA runs 11155.1 (n=7), in fast-WMMA runs 10988.8 (n=13)
+1024: WMMA naive median in slow runs 2297.0, in fast runs 3281.9

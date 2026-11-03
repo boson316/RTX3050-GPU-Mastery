@@ -28,7 +28,7 @@ They are written up in **[docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md)**.
 | | What | Where |
 |---|---|---|
 | ⚡ | **FlashAttention forward** in CUDA (one query row per thread, K/V tiles in shared memory, online softmax with `exp2`, causal tile skipping) and in Triton (autotuned, `tl.dot` on Tensor Cores) | [`flash_attention_simple/`](flash_attention_simple), [`triton_kernels/flash_attention/`](triton_kernels/flash_attention) |
-| 🧮 | **Tensor Core GEMM with WMMA**: a 64×64×32 shared-memory block tile, 4 warps × 2×2 fragments, 128-bit copies, padded shared memory. Measured: **79–87 % of cuBLAS at 2048³**; at 1024³, median 81 % with a wide 65.6–109.6 % range | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
+| 🧮 | **Tensor Core GEMM with WMMA**: a 64×64×32 shared-memory block tile, 4 warps × 2×2 fragments, 128-bit copies, padded shared memory. Measured: **79–87 % of cuBLAS at 2048³**; at 1024³, median 81 % with a wide 65.6–109.6 % range (v2.0; a v2.1 probe measured 76–83 % at 2048³ over 10 runs, with background apps on the GPU) | [`cuda_roadmap/level4_tensor_core/`](cuda_roadmap/level4_tensor_core) |
 | 🔗 | **Kernel fusion**: Triton linear layer with fused bias + GELU epilogue (the MLP is 2 launches), online softmax (2 passes instead of 3), Welford LayerNorm, conv as 9 vectorised outer products | [`triton_kernels/`](triton_kernels), [`gpu_kernels/transformer/`](gpu_kernels/transformer) |
 | 🧪 | **GPU-free verification in CI**: the Triton interpreter runs the real kernels on the CPU, and a **CUDA execution-model emulator** (threads + `std::barrier` for `__syncthreads`, per-warp exchange for `__shfl_xor_sync`) runs the real `__global__` code and turns barrier divergence into a deadlock | [`tests/`](tests) |
 | 📈 | **Roofline with device-derived peaks** (SMs × FLOPs/clk × clock from NVML). cuBLAS reaches 67 % of the roof at the NVML maximum clock and 81 % at the clock it actually sustains (2048³) | [`profiling/`](profiling), [`benchmarks/gpu_specs.py`](benchmarks/gpu_specs.py) |
@@ -51,9 +51,9 @@ flowchart LR
 | Check | Runs on | Covers |
 |---|---|---|
 | `pytest` with `TRITON_INTERPRET=1` | CI, CPU | all Triton kernels vs PyTorch: odd shapes, non-power-of-2 `head_dim`, causal (46 cases) |
-| `tests/cuda_emulation/run_all.sh` | CI, CPU | CUDA FlashAttention, softmax, LayerNorm, bias+GELU, conv3x3 vs naive references (27 cases) |
+| `tests/cuda_emulation/run_all.sh` | CI, CPU | CUDA FlashAttention, softmax, LayerNorm, bias+GELU, conv3x3 vs naive references (39 cases) |
 | `nvcc -arch=sm_86 --Werror all-warnings` | CI | every `.cu` file |
-| `pytest` on the GPU | RTX 3050 | compiled Triton kernels in FP32 and FP16, autotuned variants, all three PyTorch CUDA extensions, the timing harness (116 cases) |
+| `pytest` on the GPU | RTX 3050 | compiled Triton kernels in FP32 and FP16, autotuned variants, all three PyTorch CUDA extensions, the timing harness (129 cases) |
 | self-verifying CUDA binaries (`VERIFY_*=PASS`) | GPU | all CUDA roadmap kernels incl. WMMA, vs a CPU reference |
 | `bench_utils.measure()` | GPU | every benchmark: verify → time → plausibility check |
 
@@ -94,38 +94,41 @@ The roof is reported both ways because 2100 MHz is what NVML reports as the maxi
 
 ![Roofline](profiling/roofline/roofline_plot.png)
 
-The plot uses the NVML-maximum roof and labels one point per kernel. The table adds the sustained-clock roof.
+The plot uses the NVML-maximum roof and labels one point per kernel, from the last v2.1 round. The table adds the sustained-clock roof. The QKV, MLP, softmax, LayerNorm and GELU rows are v2.1 (median of 3 rounds); the others are v2.0.
 
 | Kernel | Bound | % of NVML-max roof (PyTorch / Triton / CUDA) | % of sustained roof (PyTorch / Triton / CUDA) |
 |---|---|---|---|
 | GEMM 2048³ | compute | 67 / 65 / — | 81 / 78 / — |
-| QKV | compute | 62 / 59 / 48 | 74 / 70 / 58 |
-| MLP | compute | 56 / 57 / 53 | 68 / 68 / 64 |
+| QKV | compute | 57 / 57 / 59 | 69 / 68 / 71 |
+| MLP | compute | 55 / 55 / 56 | 66 / 66 / 67 |
 | Attention S512 | compute | 48 / 57 / 9 | 57 / 68 / 9 |
 | Conv B128 64×64 | memory | 29 / 47 / — | 29 / 47 / — |
 | Conv B128 28×28 | memory | 26 / 44 / 70 | 26 / 44 / 70 |
-| Softmax | memory | 88 / 78 / 50 | 88 / 78 / 50 |
-| LayerNorm | memory | 84 / 65 / 43 | 84 / 65 / 43 |
-| GELU | memory | 86 / 78 / 85 | 86 / 78 / 85 |
+| Softmax | memory | 87 / 82 / 90 | 87 / 82 / 90 |
+| LayerNorm | memory | 85 / 71 / 90 | 85 / 71 / 90 |
+| GELU | memory | 88 / 88 / 85 | 88 / 88 / 85 |
 
 - **GEMM is compute-bound and cuBLAS is close to what this GPU sustains.** That leaves little room for a custom kernel: Triton matches it at 2048³ and CUDA reaches about the same range at 1024³.
-- **Softmax, LayerNorm and GELU are bandwidth-bound.** PyTorch is already at 84–88 % of the DRAM roof, so a custom kernel cannot win by much. The CUDA softmax and LayerNorm are slower, at 50 % and 43 %.
+- **Softmax, LayerNorm and GELU are bandwidth-bound.** PyTorch is at 85–88 % of the DRAM roof, so a custom kernel cannot win by much. v2.1's warp-per-row path moved the CUDA softmax and LayerNorm from 50 % and 43 % to 90 %, level with PyTorch.
 - **cuDNN reaches only 26–29 % of the memory roof for these C_in = 1 convolutions**, which is why specialised kernels can win there.
 
 ### Measurements
 
-Precision: the GEMM and Transformer rows are FP16, as are the PyTorch and Triton conv and attention rows. **The CUDA conv and attention kernels use FP32 storage**, so they move twice the bytes, and the attention kernel runs on CUDA cores rather than Tensor Cores. The CUDA GELU implements the tanh form; the other two implement the exact form. Each is verified against its own definition.
+The QKV, MLP, softmax, LayerNorm and GELU rows are v2.1; v2.0 is below as the control. The GEMM, conv and attention rows are v2.0 (not re-run; those kernels did not change). Precision: the GEMM and Transformer rows are FP16, as are the PyTorch and Triton conv and attention rows. **The CUDA conv and attention kernels use FP32 storage**, so they move twice the bytes, and the attention kernel runs on CUDA cores rather than Tensor Cores. The CUDA GELU implements the tanh form; the other two implement the exact form. Each is verified against its own definition.
 
 | Kernel | Shape | PyTorch | Triton | CUDA |
 |---|---|---|---|---|
 | GEMM | 512×512×512 | 0.053 (0.053–0.066) · 5.03 TFLOPS | 0.069 (0.060–0.069) · 3.92 TFLOPS | — |
 | GEMM | 1024×1024×1024 | 0.168 (0.168–0.184) · 12.80 TFLOPS | 0.141 (0.138–0.155) · 15.23 TFLOPS | 0.202 (0.201–0.222) · 10.65 TFLOPS |
 | GEMM | 2048×2048×2048 | 1.197 (1.178–1.205) · 14.36 TFLOPS | 1.226 (1.210–1.233) · 14.01 TFLOPS | — |
-| QKV | 2048×768→2304 | 0.545 (0.537–0.609) · 13.30 TFLOPS | 0.587 (0.546–0.674) · 12.36 TFLOPS | 0.675 (0.674–0.775) · 10.74 TFLOPS |
-| MLP | 2048×768→3072→768 | 1.612 (1.584–1.708) · 11.99 TFLOPS | 1.634 (1.630–1.698) · 11.83 TFLOPS | 1.681 (1.679–1.726) · 11.50 TFLOPS |
-| Softmax | 2048×768 | 0.054 (0.054–0.055) · 116 GB/s | 0.057 (0.057–0.060) · 110 GB/s | 0.094 (0.093–0.099) · 67 GB/s |
-| LayerNorm | 2048×768 | 0.056 (0.056–0.077) · 112 GB/s | 0.067 (0.065–0.073) · 94 GB/s | 0.111 (0.110–0.118) · 57 GB/s |
-| GELU | 1572864 | 0.056 (0.055–0.056) · 113 GB/s | 0.054 (0.054–0.060) · 116 GB/s | 0.056 (0.056–0.057) · 112 GB/s |
+| QKV | 2048×768→2304 | 0.579 (0.542–0.661) · 12.51 TFLOPS | 0.610 (0.609–0.694) · 11.89 TFLOPS | 0.609 (0.596–0.668) · 11.90 TFLOPS |
+| MLP | 2048×768→3072→768 | 1.641 (1.617–1.691) · 11.78 TFLOPS | 1.668 (1.622–1.681) · 11.59 TFLOPS | 1.603 (1.595–1.663) · 12.06 TFLOPS |
+| Softmax | 2048×768 | 0.054 (0.054–0.054) · 116 GB/s | 0.057 (0.055–0.064) · 111 GB/s | 0.053 (0.053–0.054) · 118 GB/s |
+| LayerNorm | 2048×768 | 0.056 (0.056–0.056) · 112 GB/s | 0.070 (0.068–0.085) · 90 GB/s | 0.053 (0.053–0.054) · 118 GB/s |
+| GELU | 1572864 | 0.056 (0.055–0.056) · 113 GB/s | 0.055 (0.054–0.056) · 115 GB/s | 0.056 (0.056–0.056) · 112 GB/s |
+| Softmax | 8192×768 | 0.208 (0.207–0.222) · 121 GB/s | 0.212 (0.211–0.226) · 119 GB/s | 0.207 (0.206–0.207) · 122 GB/s |
+| LayerNorm | 8192×768 | 0.214 (0.214–0.215) · 117 GB/s | 0.211 (0.211–0.215) · 119 GB/s | 0.207 (0.206–0.212) · 122 GB/s |
+| GELU | 6291456 | 0.209 (0.207–0.219) · 121 GB/s | 0.209 (0.208–0.219) · 120 GB/s | 0.214 (0.214–0.231) · 117 GB/s |
 | Conv 3×3 | B32_C1x32_28x28 | 0.084 (0.041–0.086) · 0.15 TFLOPS | 0.071 (0.067–0.103) · 0.17 TFLOPS | 0.036 (0.035–0.036) · 0.35 TFLOPS |
 | Conv 3×3 | B128_C1x32_28x28 | 0.168 (0.168–0.171) · 0.30 TFLOPS | 0.083 (0.076–0.102) · 0.60 TFLOPS | 0.124 (0.124–0.125) · 0.40 TFLOPS |
 | Conv 3×3 | B128_C1x64_64x64 | 1.680 (1.669–1.710) · 0.34 TFLOPS | 1.044 (1.019–1.049) · 0.54 TFLOPS | — |
@@ -138,50 +141,107 @@ Precision: the GEMM and Transformer rows are FP16, as are the PyTorch and Triton
 ![Attention latency](benchmarks/attention_benchmark.png)
 ![Transformer kernel latency](benchmarks/transformer_benchmark.png)
 
-**Where the custom kernels lose, and why:**
-- **CUDA QKV / MLP vs PyTorch:** the whole QKV gap (0.13 ms) is the separate bias kernel re-reading and re-writing the 2048×2304 output (18.9 MB at 132 GB/s ≈ 0.14 ms); the MLP's extra bias pass (6 MB ≈ 0.05 ms) matches its gap. PyTorch fuses bias into the GEMM epilogue. *v2.1 does the same with cublasLt; re-measurement pending.*
-- **CUDA softmax and LayerNorm are about 2x slower than PyTorch:** one block per row with one 2-byte load per thread leaves too few memory requests in flight, and the row is read twice. *v2.1 adds a warp-per-row path with 128-bit loads and the row held in registers; re-measurement pending.*
+**v2.0 control** (same rows, [`results/v2/csv/`](results/v2/csv)):
+
+| Kernel | Shape | PyTorch | Triton | CUDA |
+|---|---|---|---|---|
+| QKV | 2048×768→2304 | 0.545 (0.537–0.609) · 13.30 TFLOPS | 0.587 (0.546–0.674) · 12.36 TFLOPS | 0.675 (0.674–0.775) · 10.74 TFLOPS |
+| MLP | 2048×768→3072→768 | 1.612 (1.584–1.708) · 11.99 TFLOPS | 1.634 (1.630–1.698) · 11.83 TFLOPS | 1.681 (1.679–1.726) · 11.50 TFLOPS |
+| Softmax | 2048×768 | 0.054 (0.054–0.055) · 116 GB/s | 0.057 (0.057–0.060) · 110 GB/s | 0.094 (0.093–0.099) · 67 GB/s |
+| LayerNorm | 2048×768 | 0.056 (0.056–0.077) · 112 GB/s | 0.067 (0.065–0.073) · 94 GB/s | 0.111 (0.110–0.118) · 57 GB/s |
+| GELU | 1572864 | 0.056 (0.055–0.056) · 113 GB/s | 0.054 (0.054–0.060) · 116 GB/s | 0.056 (0.056–0.057) · 112 GB/s |
+
+**Measurement conditions differ from v2.0.** v2.0 started with 0 MiB in use on the GPU. v2.1 ran with background apps attached (532–551 MiB at idle, [`idle_background.csv`](results/v2_1/logs/idle_background.csv); not closed, by choice), on AC power and in best-performance mode as before. The unchanged PyTorch rows are the control: softmax, LayerNorm and GELU moved by at most 0.4 %, but compute-bound QKV is 6.3 % slower and MLP 1.8 % slower. So compare v2.1 kernels with PyTorch from the same round, not with v2.0's absolute numbers. All ratios are in [`aggregate.log`](results/v2_1/logs/aggregate.log).
+
+**What v2.1 changed, CUDA vs PyTorch in the same round:**
+- **Softmax and LayerNorm: goal met.** 118 GB/s each, above the 100 GB/s target and up from 67 and 57 GB/s. v2.0 was 53–97 % slower than PyTorch; v2.1 is 1.1–1.8 % faster for softmax and 5.0–5.9 % faster for LayerNorm. One DRAM read per row with 128-bit loads was the fix, and every kernel here is now at the bandwidth wall.
+- **MLP: goal met.** 1.4–2.3 % faster than PyTorch, from 1.1–6.0 % slower.
+- **QKV: much closer, parity not shown.** The gap fell from 23.8–27.4 % to 1.1–9.9 % (median 0.03 ms, from 0.14 ms), so the separate bias pass was indeed most of it. The ranges overlap, but CUDA was the slower one in all three rounds and the 0.545 ms target was not reached. The rest of the gap has no measured cause; the MLP makes two cublasLt calls and still beats PyTorch, so per-call cublasLt overhead looks unlikely but was not tested.
+
+**Where the custom kernels still lose, and why:**
 - CUDA attention at S = 512 is about 8x slower than Triton, in FP32 on CUDA cores against FP16 on Tensor Cores.
 - PyTorch wins GEMM at 512³ and SDPA wins attention at S = 128 and S = 256, though the S = 128 and S = 256 rows are close to the timing limits below.
 
-**Where they win:** CUDA conv at B = 32, Triton conv at B = 128, Triton GEMM at 1024³, and Triton attention at S = 512.
+**Where they win:** CUDA softmax, LayerNorm and MLP (by a few percent), CUDA conv at B = 32, Triton conv at B = 128, Triton GEMM at 1024³, and Triton attention at S = 512.
 
-**Row-wise kernels at 2048×768 sit on Triton's launch floor** (~0.055 ms, see *Limits* below), so those Triton rows mostly measure Python launch cost. At 8192×768 the kernels themselves are measured: softmax PyTorch 0.207 ms (122 GB/s, 92 % of DRAM peak) vs Triton 0.210 ms (120 GB/s), two runs each ([`phase4_softmax_run1.log`](results/v2/logs/phase4_softmax_run1.log), [`run2`](results/v2/logs/phase4_softmax_run2.log)). Both are at the bandwidth wall. `benchmark_transformer.py` now measures all row-wise kernels at both sizes.
+**Row-wise kernels at 2048×768 sit on Triton's launch floor** (~0.055 ms, see *Limits* below), so those Triton rows mostly measure Python launch cost. At 8192×768 the floor stops mattering: Triton is within 2.6 % of CUDA on all three kernels (LayerNorm was 32 % behind at 2048×768), and everything reaches 117–122 GB/s, the bandwidth wall. Triton had no kernel-side problem here.
 
-### FlashAttention at long sequences (B=1, H=8, D=64, FP32)
+### FlashAttention at long sequences (B=1, H=8, D=64)
 
-| S | Implementation | Latency (ms) | Extra VRAM (MiB) | Max error vs FP64 |
-|---|---|---|---|---|
-| 1024 | SDPA | 1.257 (1.254–1.271) | 2.0 | 1.104e-06 |
-| 1024 | Triton | 0.357 (0.356–0.357) | 2.0 | 1.364e-03 |
-| 1024 | CUDA | 1.238 (1.233–1.241) | 2.0 | 8.538e-07 |
-| 1024 | Matrix-materializing | — | 72.1 | — |
-| 2048 | SDPA | 4.752 (4.750–4.775) | 4.0 | 7.044e-07 |
-| 2048 | Triton | 1.291 (1.289–1.301) | 4.0 | 8.341e-04 |
-| 2048 | CUDA | 4.834 (4.817–4.836) | 4.0 | 6.183e-07 |
-| 2048 | Matrix-materializing | — | 256.0 | — |
-| 4096 | SDPA | 20.181 (20.171–20.210) | 8.0 | 3.338e-07 |
-| 4096 | Triton | 5.115 (5.098–5.119) | 8.0 | 5.551e-04 |
-| 4096 | CUDA | 17.303 (17.283–17.314) | 8.0 | 6.030e-07 |
-| 4096 | Matrix-materializing | — | 1024.0 | — |
+**FP16**
 
-- **Memory:** all three implementations use only the output buffer. A matrix-materializing attention needs 1024 MiB at S = 4096. PyTorch's SDPA already avoids that here (its backend choice is `EFFICIENT_ATTENTION`), so the saving is against the naive form, not against SDPA.
-- **The Triton column is TF32, not FP32.** On FP32 inputs `tl.dot` defaults to TF32 Tensor Cores (10-bit mantissa, relative precision ~5e-4), which is exactly the 5.6e-4–1.4e-3 error measured. SDPA (memory-efficient backend) and the CUDA kernel run IEEE FP32 on CUDA cores. So Triton's 4x is a Tensor-Core-vs-CUDA-core result, not a better kernel, and is not comparable to the other two columns.
-- **The fair IEEE FP32 race is CUDA vs SDPA:** equal up to S = 2048, and the CUDA kernel is **14 % faster at S = 4096** (17.3 vs 20.2 ms) at the same accuracy.
-- *v2.1:* `flash_attention_triton(..., precision="ieee" | "tf32")` and [`benchmarks/benchmark_attention_longseq.py`](benchmarks/benchmark_attention_longseq.py) report FP16 (what models use: SDPA FlashAttention-2 vs Triton), IEEE FP32 (SDPA vs Triton vs CUDA) and TF32 separately, each with its error vs FP64. Re-measurement pending.
+| S | Implementation | Latency (ms) | TFLOPS | Extra VRAM (MiB) | Max error vs FP64 |
+|---|---|---|---|---|---|
+| 1024 | SDPA | 0.212 (0.210–0.223) | 10.15 | 1.0 | 3.642e-04 |
+| 1024 | Triton | 0.174 (0.173–0.192) | 12.34 | 1.0 | 3.642e-04 |
+| 2048 | SDPA | 0.855 (0.771–0.907) | 10.05 | 2.0 | 2.649e-04 |
+| 2048 | Triton | 0.633 (0.621–0.666) | 13.57 | 2.0 | 2.649e-04 |
+| 4096 | SDPA | 3.300 (3.209–3.333) | 10.41 | 4.0 | 1.029e-04 |
+| 4096 | Triton | 2.447 (2.408–2.464) | 14.04 | 4.0 | 1.029e-04 |
+
+**IEEE FP32**
+
+| S | Implementation | Latency (ms) | TFLOPS | Extra VRAM (MiB) | Max error vs FP64 |
+|---|---|---|---|---|---|
+| 1024 | SDPA | 1.336 (1.327–1.435) | 1.61 | 2.0 | 1.104e-06 |
+| 1024 | Triton | 1.526 (1.494–1.531) | 1.41 | 2.0 | 9.730e-07 |
+| 1024 | CUDA | 1.291 (1.270–1.322) | 1.66 | 2.0 | 8.538e-07 |
+| 2048 | SDPA | 4.769 (4.754–4.805) | 1.8 | 4.0 | 7.772e-07 |
+| 2048 | Triton | 5.754 (5.709–5.755) | 1.49 | 4.0 | 4.165e-07 |
+| 2048 | CUDA | 4.858 (4.830–4.914) | 1.77 | 4.0 | 5.634e-07 |
+| 4096 | SDPA | 20.397 (20.380–20.463) | 1.68 | 8.0 | 4.184e-07 |
+| 4096 | Triton | 21.328 (21.228–21.356) | 1.61 | 8.0 | 4.313e-07 |
+| 4096 | CUDA | 17.600 (17.395–17.615) | 1.95 | 8.0 | 5.905e-07 |
+
+**TF32**
+
+| S | Implementation | Latency (ms) | TFLOPS | Extra VRAM (MiB) | Max error vs FP64 |
+|---|---|---|---|---|---|
+| 1024 | Triton | 0.375 (0.365–0.391) | 5.72 | 2.0 | 1.367e-03 |
+| 2048 | Triton | 1.357 (1.350–1.361) | 6.33 | 4.0 | 1.767e-03 |
+| 4096 | Triton | 5.220 (5.097–5.267) | 6.58 | 8.0 | 5.593e-04 |
+
+- **Memory:** every implementation uses only the output buffer. A matrix-materializing attention needs 1024 MiB at S = 4096 (v2.0, [`results/v2/tables_en.md`](results/v2/tables_en.md)). PyTorch's SDPA already avoids that here (its backend choice is `EFFICIENT_ATTENTION`), so the saving is against the naive form, not against SDPA.
+- **FP16, what models actually use: Triton is 18–26 % faster than SDPA** with the same error to 4 digits.
+- **IEEE FP32, the race v2.0 could not run fairly:** the CUDA kernel is 3.4 % faster than SDPA at S = 1024, 1.9 % slower at S = 2048 and **13.7 % faster at S = 4096** (17.6 vs 20.4 ms). Triton with `precision="ieee"` is the slowest here, 4.6–20.7 % behind SDPA, with errors of 4.2e-07–9.7e-07 (target ≤1e-4).
+- **v2.0's "Triton 4x faster" was TF32 vs IEEE:** the same Triton kernel is 4.1–4.2x slower in IEEE mode, which accounts for all of it.
+- **TF32 loses to FP16 on every count measured here:** 2.1–2.2x slower, twice the VRAM and a larger error (5.6e-04–1.8e-03 vs 1.0e-04–3.6e-04). Its one possible advantage is FP32's exponent range, which this random-input test does not exercise. Why its error exceeds FP16's was not measured.
 
 ### WMMA tiled GEMM vs cuBLAS (FP16)
 
 | Metric | Median | Min | Max | Runs |
 |---|---|---|---|---|
-| 1024³ WMMA tiled (GFLOPS) | 7530.6 | 7489.8 | 10979.9 | 12 |
-| 1024³ cuBLAS (GFLOPS) | 11366.8 | 6944.2 | 11459.8 | 12 |
-| 1024³ WMMA % of cuBLAS (%) | 81.4 | 65.6 | 109.6 | 12 |
-| 2048³ WMMA tiled (GFLOPS) | 11648.3 | 11358.3 | 12122.3 | 6 |
-| 2048³ cuBLAS (GFLOPS) | 14123.6 | 13969.4 | 14364.1 | 6 |
-| 2048³ WMMA % of cuBLAS (%) | 81.9 | 79.1 | 86.5 | 6 |
+| 1024³ WMMA tiled (GFLOPS) | 9605.5 | 7410.4 | 10699.8 | 20 |
+| 1024³ cuBLAS (GFLOPS) | 11077.9 | 8974.2 | 11397.6 | 20 |
+| 1024³ WMMA % of cuBLAS (%) | 85.5 | 66.5 | 115.2 | 20 |
+| 2048³ WMMA tiled (GFLOPS) | 11635.0 | 10901.4 | 11792.4 | 10 |
+| 2048³ cuBLAS (GFLOPS) | 14321.1 | 14005.5 | 14413.4 | 10 |
+| 2048³ WMMA % of cuBLAS (%) | 81.2 | 75.6 | 83.0 | 10 |
 
-These are independent process runs, and each one passed verification. At 2048³ the runs are consistent. At 1024³ the results fall into two groups, and whole runs land in the slower one. **The cause is not known yet**: a 1 s preheat did not remove it ([`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)). Whole-run clusters that also hit cuBLAS point at GPU state (P-state, power cap) rather than the kernel; [`tools/gpu_state_probe.py`](tools/gpu_state_probe.py) records P-state, clocks, power and NVML throttle reasons per run to test that. Do not read a single run of this benchmark as the answer.
+Earlier v2.0 numbers: 2048³ WMMA 79.1–86.5 % of cuBLAS (6 runs); 1024³ median 81.4 %, range 65.6–109.6 % (12 runs). All runs above passed verification.
+
+**Slow and fast 1024³ runs, split by [`tools/gpu_state_probe.py`](tools/gpu_state_probe.py) at 8058 GFLOPS** ([`log`](results/v2_1/logs/gpu_state_probe_1024.log)):
+
+| State | Slow runs | Fast runs |
+|---|---|---|
+| Runs | 7 | 13 |
+| `WMMA_TILED_GFLOPS` | 7570.9 | 10295.9 |
+| `WMMA_NAIVE_GFLOPS` | 2297.0 | 3281.9 |
+| `CUBLAS_GFLOPS` | 11155.1 | 10988.8 |
+| `sm_mhz_median` | 990.0 | 990.0 |
+| `mem_mhz_median` | 5501.0 | 5501.0 |
+| `power_w_median` | 9.0 | 7.7 |
+| `temp_c_median` | 65.0 | 65.0 |
+| `pstates` | P0, P0/P3, P0/P3/P5, P0/P5 | P0, P0/P3, P0/P5, P3 |
+| `throttle` | none, sw_power_cap+sw_thermal | none, sw_power_cap+sw_thermal |
+
+**No recorded state variable separates them.** Clock, memory clock, temperature and power are about equal, and P-states and throttle reasons appear in both groups. At 2048³ there are no clusters at all (10.9–11.8 TFLOPS), and all 10 runs hit `sw_power_cap` ([`log`](results/v2_1/logs/gpu_state_probe_2048.log)).
+
+**The evidence argues against the whole-run GPU state theory v2.0 proposed** ([`analyze_probe.log`](results/v2_1/logs/analyze_probe.log)):
+- It is not two tight clusters: 7 runs at 7410–7626 GFLOPS, 3 between 8490 and 9362, 10 at 9849–10700.
+- WMMA naive follows WMMA tiled (r = +0.99), but cuBLAS, timed right after them in the same process on the same buffers, does not (r = −0.36; median 11155 GFLOPS in slow runs, 10989 in fast). cuBLAS's own dips (8974–9279 GFLOPS, 3 runs) all came in fast-WMMA runs.
+
+**The cause is still unknown, and this probe has a limit:** it samples every 20 ms and these kernels run for about 0.2 ms. Its median clock of 990 MHz allows 10136 GFLOPS at most, yet cuBLAS reached 11398 (at least 1113 MHz), so the samples do not show the clock while the kernel ran. A state change that short is not excluded. Something specific to the two WMMA kernels in a given process is the next thing to test, for example where their buffers land in DRAM, but that is an untested idea. Do not read a single run of this benchmark as the answer.
 
 All 11 CUDA roadmap benchmarks pass verification; results are in [`cuda_roadmap/results.md`](cuda_roadmap/results.md). Not every "optimization" helps: the bank-conflict padding measured 1.00x and the persistent grid-stride kernel 0.97x.
 

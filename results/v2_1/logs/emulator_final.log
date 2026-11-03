@@ -1,0 +1,48 @@
+=== test_conv_emu
+PASS conv3x3 B=2 H= 28 W= 28  max|err|=1.93e-06
+PASS conv3x3 B=1 H= 18 W= 18  max|err|=1.30e-06
+PASS conv3x3 B=1 H=  3 W= 40  max|err|=1.67e-06
+PASS conv3x3 B=3 H= 35 W= 19  max|err|=1.96e-06
+
+all cases passed
+=== test_flash_attention_emu
+PASS BH=2 S=  64 D=64 causal=0  max|err|=5.36e-07
+PASS BH=2 S= 100 D=64 causal=0  max|err|=4.62e-07
+PASS BH=1 S=  17 D=32 causal=0  max|err|=3.58e-07
+PASS BH=3 S= 130 D=40 causal=0  max|err|=4.17e-07
+PASS BH=1 S=   1 D= 8 causal=0  max|err|=0.00e+00
+PASS BH=1 S= 257 D=16 causal=0  max|err|=4.17e-07
+PASS BH=2 S=  64 D=64 causal=1  max|err|=8.94e-07
+PASS BH=2 S= 100 D=64 causal=1  max|err|=5.66e-07
+PASS BH=1 S=  17 D=32 causal=1  max|err|=4.17e-07
+PASS BH=3 S= 130 D=40 causal=1  max|err|=7.15e-07
+PASS BH=1 S=   1 D= 8 causal=1  max|err|=0.00e+00
+PASS BH=1 S= 257 D=16 causal=1  max|err|=3.58e-07
+
+all cases passed
+=== test_transformer_emu
+PASS softmax    rows=  4 cols=    7 threads=  32  max|err|=6.34e-08
+PASS layernorm  rows=  4 cols=    7 threads=  32  max|err|=2.14e-07
+PASS softmax    rows=  4 cols=   33 threads=  64  max|err|=9.79e-08
+PASS layernorm  rows=  4 cols=   33 threads=  64  max|err|=3.53e-07
+PASS softmax    rows=  4 cols=  100 threads= 128  max|err|=6.66e-08
+PASS layernorm  rows=  4 cols=  100 threads= 128  max|err|=8.47e-07
+PASS softmax    rows=  4 cols=  768 threads= 768  max|err|=2.59e-08
+PASS layernorm  rows=  4 cols=  768 threads= 768  max|err|=2.73e-06
+PASS softmax    rows=  4 cols= 1500 threads=1024  max|err|=1.03e-08
+PASS layernorm  rows=  4 cols= 1500 threads=1024  max|err|=4.92e-06
+PASS bias+gelu  rows=  5 cols=   37 threads=  64  max|err|=4.13e-07
+PASS softmax_w  rows=  7 cols=    8 threads= 128  max|err|=6.65e-08
+PASS layernrm_w rows=  7 cols=    8 threads= 128  max|err|=9.62e-08
+PASS softmax_w  rows=  7 cols=  256 threads= 128  max|err|=2.35e-08
+PASS layernrm_w rows=  7 cols=  256 threads= 128  max|err|=3.57e-07
+PASS softmax_w  rows=  7 cols=  264 threads= 128  max|err|=5.86e-08
+PASS layernrm_w rows=  7 cols=  264 threads= 128  max|err|=3.22e-07
+PASS softmax_w  rows=  7 cols=  768 threads= 128  max|err|=1.10e-07
+PASS layernrm_w rows=  7 cols=  768 threads= 128  max|err|=4.56e-07
+PASS softmax_w  rows=  7 cols= 1000 threads= 128  max|err|=1.13e-07
+PASS layernrm_w rows=  7 cols= 1000 threads= 128  max|err|=7.55e-07
+PASS softmax_w  rows=  7 cols= 1024 threads= 128  max|err|=7.22e-08
+PASS layernrm_w rows=  7 cols= 1024 threads= 128  max|err|=6.23e-07
+
+all cases passed
