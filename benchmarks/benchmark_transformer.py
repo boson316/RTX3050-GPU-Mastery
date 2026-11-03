@@ -43,6 +43,7 @@ from benchmarks.transformer_reference import (
 USE_CUDA_EXT = os.environ.get("TRANSFORMER_BENCHMARK_CUDA", "1").strip().lower() not in ("0", "false", "no")
 FULL = os.environ.get("TRANSFORMER_BENCHMARK_FULL", "").strip().lower() in ("1", "true", "yes")
 B, S, H = (32, 512, 768) if FULL else (8, 256, 768)
+M_LARGE = 8192  # rows for the second, launch-floor-free pass of the row-wise kernels
 DTYPE = torch.float16
 WARMUP, REPEAT = 10, 50
 KERNELS = ["QKV", "Softmax", "LayerNorm", "GELU", "MLP"]
@@ -115,6 +116,42 @@ def run_case(kernel: str, candidates: list[tuple[str, Callable | None]], ref: to
     return rows
 
 
+def bench_rowwise(M: int, tag: str) -> list[dict]:
+    """Softmax, LayerNorm and GELU on an M x H FP16 tensor; `tag` is appended to the kernel name."""
+    rows: list[dict] = []
+    # Softmax over the last dim (attention-score-like rows)
+    xs = torch.randn(M, H, device="cuda", dtype=DTYPE) * 3
+    ref = torch.softmax(xs.float(), -1)
+    t, c = _triton("softmax"), _cuda("softmax")
+    rows += run_case("Softmax" + tag, [
+        ("PyTorch", lambda: softmax_pytorch(xs, -1)),
+        ("Triton", t and (lambda: t(xs, dim=-1))),
+        ("CUDA", c and (lambda: c(xs, -1))),
+    ], ref, nbytes(xs), nbytes(xs), None)
+
+    # LayerNorm (non-trivial affine params so a broken gamma/beta path would be caught)
+    xl = torch.randn(M, H, device="cuda", dtype=DTYPE) * 2 + 1
+    g = torch.randn(H, device="cuda", dtype=DTYPE)
+    be = torch.randn(H, device="cuda", dtype=DTYPE)
+    ref = torch.nn.functional.layer_norm(xl.float(), (H,), g.float(), be.float(), 1e-5)
+    t, c = _triton("layernorm"), _cuda("layernorm")
+    rows += run_case("LayerNorm" + tag, [
+        ("PyTorch", lambda: layernorm_pytorch(xl, g, be)),
+        ("Triton", t and (lambda: t(xl, (H,), g, be))),
+        ("CUDA", c and (lambda: c(xl, g, be, 1e-5))),
+    ], ref, nbytes(xl, g, be), nbytes(xl), None)
+
+    # GELU. Triton implements the exact (erf) form, the CUDA kernel the tanh form: each is
+    # verified against its own definition, and both are timed on the same tensor.
+    xg = torch.randn(M * H, device="cuda", dtype=DTYPE) * 2
+    t, c = _triton("gelu"), _cuda("gelu")
+    rows += run_case("GELU" + tag, [("PyTorch", lambda: gelu_pytorch(xg)), ("Triton", t and (lambda: t(xg)))],
+                     torch.nn.functional.gelu(xg.float()), nbytes(xg), nbytes(xg), None)
+    rows += run_case("GELU" + tag, [("CUDA", c and (lambda: c(xg)))],
+                     torch.nn.functional.gelu(xg.float(), approximate="tanh"), nbytes(xg), nbytes(xg), None)
+    return rows
+
+
 def main() -> None:
     if not torch.cuda.is_available():
         print("CUDA not available; run on a GPU.")
@@ -138,36 +175,12 @@ def main() -> None:
         ("CUDA", c and (lambda: c(x, w, b))),
     ], ref, nbytes(x, w, b), M * 3 * H * 2, 2.0 * M * H * 3 * H)
 
-    # Softmax over the last dim (attention-score-like rows)
-    xs = torch.randn(M, H, device=dev, dtype=DTYPE) * 3
-    ref = torch.softmax(xs.float(), -1)
-    t, c = _triton("softmax"), _cuda("softmax")
-    rows += run_case("Softmax", [
-        ("PyTorch", lambda: softmax_pytorch(xs, -1)),
-        ("Triton", t and (lambda: t(xs, dim=-1))),
-        ("CUDA", c and (lambda: c(xs, -1))),
-    ], ref, nbytes(xs), nbytes(xs), None)
-
-    # LayerNorm (non-trivial affine params so a broken gamma/beta path would be caught)
-    xl = torch.randn(M, H, device=dev, dtype=DTYPE) * 2 + 1
-    g = torch.randn(H, device=dev, dtype=DTYPE)
-    be = torch.randn(H, device=dev, dtype=DTYPE)
-    ref = torch.nn.functional.layer_norm(xl.float(), (H,), g.float(), be.float(), 1e-5)
-    t, c = _triton("layernorm"), _cuda("layernorm")
-    rows += run_case("LayerNorm", [
-        ("PyTorch", lambda: layernorm_pytorch(xl, g, be)),
-        ("Triton", t and (lambda: t(xl, (H,), g, be))),
-        ("CUDA", c and (lambda: c(xl, g, be, 1e-5))),
-    ], ref, nbytes(xl, g, be), nbytes(xl), None)
-
-    # GELU. Triton implements the exact (erf) form, the CUDA kernel the tanh form: each is
-    # verified against its own definition, and both are timed on the same tensor.
-    xg = torch.randn(M * H, device=dev, dtype=DTYPE) * 2
-    t, c = _triton("gelu"), _cuda("gelu")
-    rows += run_case("GELU", [("PyTorch", lambda: gelu_pytorch(xg)), ("Triton", t and (lambda: t(xg)))],
-                     torch.nn.functional.gelu(xg.float()), nbytes(xg), nbytes(xg), None)
-    rows += run_case("GELU", [("CUDA", c and (lambda: c(xg)))],
-                     torch.nn.functional.gelu(xg.float(), approximate="tanh"), nbytes(xg), nbytes(xg), None)
+    rows += bench_rowwise(M, "")
+    # At 2048 x 768 a row-wise kernel takes ~0.05 ms, right at Triton's ~0.055 ms Python launch
+    # floor, so those rows measure launch overhead more than the kernel. 8192 x 768 (~0.2 ms)
+    # measures the kernels themselves.
+    if M != M_LARGE:
+        rows += bench_rowwise(M_LARGE, f"@{M_LARGE}x{H}")
 
     # MLP: H -> 4H -> H
     xm = torch.randn(M, H, device=dev, dtype=DTYPE)

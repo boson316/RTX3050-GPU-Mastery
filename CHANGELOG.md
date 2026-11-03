@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased (v2.1) - code done, GPU re-measurement pending
+
+Follow-ups from analysing the v2.0.0 measurements. The kernels pass the CPU emulator and the
+interpreter tests; the speed claims below are expectations until re-measured on the GPU.
+
+### Performance
+- **QKV / MLP:** bias and bias+GELU fused into the GEMM epilogue with cublasLt. v2.0's QKV gap to
+  PyTorch (0.13 ms) equals the cost of the separate bias pass (18.9 MB at 132 GB/s), so the expected
+  result is parity with PyTorch.
+- **Softmax / LayerNorm (CUDA):** new warp-per-row path for n_cols % 8 == 0 and n_cols <= 1024:
+  128-bit loads, row held in registers (one DRAM read), shuffle-only reductions, 4 rows per block.
+  v2.0 measured 67 / 57 GB/s against ~115 GB/s for PyTorch.
+
+### Measurement
+- **Attention precision made explicit:** `flash_attention_triton(precision="tf32" | "ieee")`, and
+  `benchmarks/benchmark_attention_longseq.py` reports FP16, IEEE FP32 and TF32 separately with the
+  error vs FP64. v2.0's "Triton 4x faster with 1000x the error" was TF32 vs IEEE FP32.
+- **Row-wise kernels at two sizes:** `benchmark_transformer.py` also runs softmax / LayerNorm / GELU
+  at 8192x768, because at 2048x768 Triton sits on its ~0.055 ms launch floor.
+- **`tools/gpu_state_probe.py`:** records P-state, clocks, power and NVML throttle reasons per run to
+  explain the 1024³ WMMA two-cluster behaviour.
+
+### Tests
+- 12 new CPU-emulator cases for the warp-per-row kernels; GPU tests for both softmax/LayerNorm paths,
+  odd-shaped and bias-free cublasLt GEMMs, and Triton attention in IEEE vs TF32.
+
 ## v2.0.0
 
 First release verified on the real GPU (RTX 3050 6GB Laptop). Measurements are in the README; raw logs and CSVs are in `results/v2/`.

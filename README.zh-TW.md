@@ -132,12 +132,15 @@ Roof 用兩種時脈呈現，因為 2100 MHz 是 NVML 回報的最大值，而�
 ![Attention latency](benchmarks/attention_benchmark.png)
 ![Transformer kernel latency](benchmarks/transformer_benchmark.png)
 
-**自訂 kernel 較慢的地方：**
-- CUDA 的 softmax 和 LayerNorm 比 PyTorch 慢約 2 倍（原因見上面的 roofline）。
+**自訂 kernel 較慢的地方，以及原因：**
+- **CUDA 的 QKV 和 MLP 比 PyTorch 慢：** QKV 的差距（0.13 ms）全部來自獨立的 bias kernel，它要把 2048×2304 的輸出再讀寫一次（18.9 MB，在 132 GB/s 下約 0.14 ms）；MLP 多出的 bias pass（6 MB，約 0.05 ms）也剛好對得上差距。PyTorch 把 bias 融進 GEMM 的 epilogue。*v2.1 改用 cublasLt 做同樣的事，待重新量測。*
+- **CUDA 的 softmax 和 LayerNorm 比 PyTorch 慢約 2 倍：** 每個 block 處理一列、每個 thread 只讀 2 bytes，同時在途的記憶體請求太少，而且每列要讀兩次。*v2.1 新增 warp-per-row 路徑：128-bit 讀取，整列留在 register 裡，待重新量測。*
 - S = 512 時 CUDA attention 比 Triton 慢約 8 倍，比較的是 CUDA core 上的 FP32 和 Tensor Core 上的 FP16。
 - PyTorch 在 512³ 的 GEMM 較快，SDPA 在 S = 128、256 的 attention 較快，但這兩個 S 的結果已接近下面所說的計時極限。
 
 **自訂 kernel 較快的地方：** B = 32 的 CUDA 卷積、B = 128 的 Triton 卷積、1024³ 的 Triton GEMM，以及 S = 512 的 Triton attention。
+
+**2048×768 的逐列 kernel 落在 Triton 的 launch 下限上**（約 0.055 ms，見下方「限制」），所以那幾格 Triton 的數字主要反映 Python 的 launch 開銷。改用 8192×768 才量得到 kernel 本身：softmax 的 PyTorch 0.207 ms（122 GB/s，DRAM 峰值的 92%），Triton 0.210 ms（120 GB/s），各跑兩次（[`phase4_softmax_run1.log`](results/v2/logs/phase4_softmax_run1.log)、[`run2`](results/v2/logs/phase4_softmax_run2.log)）。兩者都已經頂到頻寬牆。`benchmark_transformer.py` 現在會在兩種大小下量所有逐列 kernel。
 
 ### 長序列 FlashAttention（B=1、H=8、D=64、FP32）
 
@@ -157,8 +160,9 @@ Roof 用兩種時脈呈現，因為 2100 MHz 是 NVML 回報的最大值，而�
 | 4096 | 傳統（產生完整矩陣） | — | 1024.0 | — |
 
 - **顯存：** 三種實作都只需要輸出緩衝區，傳統寫法在 S = 4096 時要 1024 MiB。但這裡 PyTorch 的 SDPA 本身就避開了完整矩陣（後端選擇是 `EFFICIENT_ATTENTION`），所以省下的是相對傳統寫法，不是相對 SDPA。
-- **Triton 的速度有精度代價。** `tl.dot` 處理 FP32 輸入時會用 Tensor Core（TF32），誤差約為 SDPA 和 CUDA 的 1000 倍。這個延遲差距應視為用精度換速度，不是純粹的勝利。
-- **CUDA 是完整 FP32，到 S = 2048 都和 SDPA 相當**，S = 4096 時則比較快。
+- **Triton 這一欄是 TF32，不是 FP32。** `tl.dot` 處理 FP32 輸入時預設走 TF32 Tensor Core（10-bit 尾數，相對精度約 5e-4），正好就是量到的 5.6e-4～1.4e-3 誤差。SDPA（memory-efficient 後端）和 CUDA kernel 則是在 CUDA core 上跑 IEEE FP32。所以 Triton 快 4 倍是「Tensor Core 對 CUDA core」的結果，不代表 kernel 比較好，也不能和另外兩欄直接比較。
+- **公平的 IEEE FP32 比較是 CUDA 對 SDPA：** 到 S = 2048 都相當，S = 4096 時 CUDA kernel **快 14%**（17.3 對 20.2 ms），精度相同。
+- *v2.1：* `flash_attention_triton(..., precision="ieee" | "tf32")` 和 [`benchmarks/benchmark_attention_longseq.py`](benchmarks/benchmark_attention_longseq.py) 會分開報告 FP16（實際模型用的：SDPA FlashAttention-2 對 Triton）、IEEE FP32（SDPA、Triton、CUDA）和 TF32，並各自附上相對 FP64 的誤差。待重新量測。
 
 ### WMMA tiled GEMM 與 cuBLAS（FP16）
 
@@ -171,7 +175,7 @@ Roof 用兩種時脈呈現，因為 2100 MHz 是 NVML 回報的最大值，而�
 | 2048³ cuBLAS (GFLOPS) | 14123.6 | 13969.4 | 14364.1 | 6 |
 | 2048³ WMMA % of cuBLAS (%) | 81.9 | 79.1 | 86.5 | 6 |
 
-這些是彼此獨立的行程執行，每次都通過驗證。2048³ 各次相當一致。1024³ 則分成兩群，而且是整次執行落在較慢的那一群。**目前還不知道原因**：1 秒預熱並沒有消除它（[`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)）。請不要把這個 benchmark 的單次結果當成答案。
+這些是彼此獨立的行程執行，每次都通過驗證。2048³ 各次相當一致。1024³ 則分成兩群，而且是整次執行落在較慢的那一群。**目前還不知道原因**：1 秒預熱並沒有消除它（[`results/v2/logs/wmma_old_vs_new.log`](results/v2/logs/wmma_old_vs_new.log)）。整次執行一起變慢、而且 cuBLAS 也會受影響，代表原因比較可能是 GPU 的狀態（P-state、功耗上限），而不是 kernel 本身；[`tools/gpu_state_probe.py`](tools/gpu_state_probe.py) 會在每次執行時記錄 P-state、時脈、功耗和 NVML 的降頻原因，用來驗證這個假設。請不要把這個 benchmark 的單次結果當成答案。
 
 CUDA roadmap 的 11 個 benchmark 全部通過驗證，結果見 [`cuda_roadmap/results.md`](cuda_roadmap/results.md)。不是每個「最佳化」都有效：bank conflict 的 padding 量到 1.00x，persistent grid-stride kernel 是 0.97x。
 

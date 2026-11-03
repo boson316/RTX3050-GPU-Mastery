@@ -6,11 +6,11 @@ GPU kernels used in transformer architectures, targeting RTX 3050 (sm_86).
 
 | Kernel | Description |
 |--------|-------------|
-| **Fused QKV** | `y = x @ W_qkv + b`: one row-major cuBLAS GEMM (`Yᵀ = WᵀXᵀ`, no transpose kernel) + bias epilogue |
-| **Softmax** | Row-wise **online** softmax: running (max, sum) in one pass, normalise in a second (2 reads instead of 3) |
-| **LayerNorm** | Welford mean/variance with a parallel (Chan) merge across warps: 2 reads, numerically stable |
+| **Fused QKV** | `y = x @ W_qkv + b`: one row-major cublasLt GEMM (`Yᵀ = WᵀXᵀ`) with the bias fused into the epilogue |
+| **Softmax** | Warp-per-row path (n_cols % 8 == 0, ≤ 1024): 128-bit loads, row in registers, one DRAM read. Fallback: block-per-row **online** softmax (2 reads) |
+| **LayerNorm** | Warp-per-row path as above with exact two-pass statistics from registers. Fallback: block-per-row Welford (2 reads) |
 | **GELU** | tanh form `0.5·x·(1 + tanh(√(2/π)(x + 0.044715x³)))`, grid-stride loop |
-| **Fused MLP** | GEMM → fused bias+GELU epilogue → GEMM → bias |
+| **Fused MLP** | cublasLt GEMM with bias+GELU epilogue → cublasLt GEMM with bias epilogue (2 launches) |
 
 FP16 storage, FP32 math. Block reductions always run the second stage on a full warp; the earlier
 version used `__shfl_xor_sync(0xffffffff)` with 8 active lanes, which could hang (see
